@@ -9,3 +9,5 @@ dist/
 *.lib
 !third_party/webview2/**/*.dll
 !third_party/webview2/**/*.lib
+
+release/

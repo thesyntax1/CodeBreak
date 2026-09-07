@@ -1,0 +1,1122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CodeBreak — Binary Analysis Suite</title>
+<style>
+:root {
+  --bg: #0b0e14;
+  --panel: #121722;
+  --panel2: #171e2c;
+  --border: #232c40;
+  --border2: #2d3a55;
+  --text: #d7e0f0;
+  --dim: #8b98b4;
+  --dim2: #5f6c88;
+  --accent: #4d9fff;
+  --accent2: #7c6cf0;
+  --good: #3fd68f;
+  --warn: #f5c451;
+  --bad: #ff6b6b;
+  --info: #6cb6ff;
+  --mono: "Cascadia Code", "Consolas", "JetBrains Mono", monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2a3450; border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: #38466b; }
+
+#topbar {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  background: linear-gradient(180deg, #131a2a, #0f141f);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#logo { display: flex; align-items: center; gap: 10px; user-select: none; }
+#logo .mark {
+  width: 30px; height: 30px; border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-weight: 700; font-size: 14px; color: #fff;
+  box-shadow: 0 2px 10px rgba(77,159,255,.35);
+}
+#logo .name { font-size: 16px; font-weight: 600; letter-spacing: .3px; }
+#logo .name span { color: var(--accent); }
+#logo .tag { font-size: 10px; color: var(--dim2); margin-top: 1px; }
+#openBtn {
+  height: 34px; padding: 0 18px; border: none; border-radius: 7px;
+  background: linear-gradient(135deg, var(--accent), #3b7fe0);
+  color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+}
+#openBtn:hover { filter: brightness(1.12); }
+#openBtn:active { filter: brightness(.92); }
+#fileChip {
+  flex: 1; min-width: 0; display: none; align-items: center; gap: 10px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 7px;
+  height: 34px; padding: 0 12px; overflow: hidden;
+}
+#fileChip .fname { font-family: var(--mono); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#fileChip .fsize { color: var(--dim); font-size: 11px; white-space: nowrap; }
+#fmtBadge {
+  font-size: 10px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 4px; background: rgba(77,159,255,.15);
+  color: var(--accent); border: 1px solid rgba(77,159,255,.35); white-space: nowrap;
+}
+#perfChip { color: var(--dim2); font-size: 11px; font-family: var(--mono); white-space: nowrap; }
+
+#main { flex: 1; display: flex; min-height: 0; }
+#sidebar {
+  width: 216px; flex-shrink: 0; background: var(--panel);
+  border-right: 1px solid var(--border); display: flex; flex-direction: column;
+  overflow-y: auto;
+}
+.navtab {
+  display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+  color: var(--dim); cursor: pointer; border-left: 2px solid transparent;
+  font-size: 13px; user-select: none;
+}
+.navtab:hover { color: var(--text); background: rgba(255,255,255,.02); }
+.navtab.active { color: var(--accent); border-left-color: var(--accent); background: rgba(77,159,255,.07); font-weight: 600; }
+.navtab .ic { width: 16px; text-align: center; font-family: var(--mono); font-size: 12px; opacity: .85; }
+.navtab .cnt { margin-left: auto; font-size: 10px; color: var(--dim2); background: var(--panel2); border: 1px solid var(--border); padding: 1px 6px; border-radius: 8px; }
+
+#content { flex: 1; overflow-y: auto; padding: 20px 24px; min-width: 0; }
+.page { display: none; }
+.page.active { display: block; animation: fadein .15s ease; }
+@keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+.welcome { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 18px; color: var(--dim); }
+.welcome .bigic { font-size: 64px; opacity: .25; }
+.welcome h2 { font-weight: 400; color: var(--dim); }
+.welcome kbd { background: var(--panel2); border: 1px solid var(--border2); border-radius: 4px; padding: 2px 6px; font-family: var(--mono); font-size: 11px; }
+
+h3.sec { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim2); margin: 22px 0 10px; display: flex; align-items: center; gap: 8px; }
+h3.sec:first-child { margin-top: 0; }
+h3.sec::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+.grid { display: grid; gap: 12px; }
+.g2 { grid-template-columns: 1fr 1fr; }
+.g3 { grid-template-columns: 1fr 1fr 1fr; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.card h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--dim); margin-bottom: 10px; }
+
+.kv { display: flex; gap: 10px; padding: 3px 0; font-size: 12.5px; }
+.kv .k { color: var(--dim); width: 150px; flex-shrink: 0; }
+.kv .v { font-family: var(--mono); font-size: 12px; word-break: break-all; }
+.kv .v.click { color: var(--accent); cursor: pointer; }
+.kv .v.click:hover { text-decoration: underline; }
+
+table.tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tbl th {
+  text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .7px;
+  color: var(--dim2); padding: 7px 10px; border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: var(--panel); z-index: 2; white-space: nowrap;
+}
+.tbl td { padding: 6px 10px; border-bottom: 1px solid rgba(35,44,64,.5); font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }
+.tbl tr:hover td { background: rgba(77,159,255,.05); }
+.tbl tr.click { cursor: pointer; }
+.tbl td.dim { color: var(--dim); }
+.tblwrap { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: auto; max-height: 60vh; }
+
+.badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; margin: 1px 3px 1px 0; font-family: var(--mono); }
+.badge.b-blue { background: rgba(77,159,255,.12); color: var(--accent); border: 1px solid rgba(77,159,255,.3); }
+.badge.b-green { background: rgba(63,214,143,.1); color: var(--good); border: 1px solid rgba(63,214,143,.3); }
+.badge.b-yellow { background: rgba(245,196,81,.1); color: var(--warn); border: 1px solid rgba(245,196,81,.3); }
+.badge.b-red { background: rgba(255,107,107,.1); color: var(--bad); border: 1px solid rgba(255,107,107,.3); }
+.badge.b-gray { background: rgba(139,152,180,.08); color: var(--dim); border: 1px solid rgba(139,152,180,.25); }
+.badge.b-purple { background: rgba(124,108,240,.12); color: #a99cf5; border: 1px solid rgba(124,108,240,.35); }
+
+.ebar { position: relative; height: 6px; border-radius: 3px; background: #1c2436; width: 90px; overflow: hidden; }
+.ebar .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; }
+
+.hashrow { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.hashrow .hk { color: var(--dim); font-size: 11px; width: 62px; flex-shrink: 0; font-weight: 600; }
+.hashrow .hv { font-family: var(--mono); font-size: 11.5px; color: #b8c6e4; word-break: break-all; flex: 1; }
+.copybtn { background: none; border: 1px solid var(--border2); color: var(--dim); border-radius: 4px; font-size: 10px; padding: 2px 7px; cursor: pointer; flex-shrink: 0; }
+.copybtn:hover { color: var(--accent); border-color: var(--accent); }
+
+.ind { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border-radius: 8px; margin-bottom: 6px; border: 1px solid var(--border); background: var(--panel); }
+.ind .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+.ind .t { font-weight: 600; font-size: 12.5px; }
+.ind .d { color: var(--dim); font-size: 11.5px; margin-top: 2px; line-height: 1.45; }
+.ind.s2 .dot { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+.ind.s1 .dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+.ind.s0 .dot { background: var(--info); box-shadow: 0 0 8px var(--info); }
+.ind.s2 { border-color: rgba(255,107,107,.35); }
+.ind.s1 { border-color: rgba(245,196,81,.3); }
+
+#entropyCanvas { width: 100%; height: 140px; display: block; background: #0d1220; border-radius: 6px; border: 1px solid var(--border); }
+.enthover { position: absolute; pointer-events: none; background: #1c2438; border: 1px solid var(--border2); padding: 6px 9px; border-radius: 6px; font-family: var(--mono); font-size: 10.5px; display: none; z-index: 10; white-space: nowrap; }
+
+.toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.toolbar input[type=text] {
+  background: var(--panel2); border: 1px solid var(--border2); color: var(--text);
+  border-radius: 7px; padding: 7px 12px; font-size: 12px; font-family: var(--mono);
+  outline: none; width: 280px;
+}
+.toolbar input[type=text]:focus { border-color: var(--accent); }
+.toolbar select {
+  background: var(--panel2); border: 1px solid var(--border2); color: var(--text);
+  border-radius: 7px; padding: 6px 8px; font-size: 12px; outline: none;
+}
+.toolbar .spacer { flex: 1; }
+.toolbar .meta { color: var(--dim2); font-size: 11px; font-family: var(--mono); }
+
+#stringsList { display: flex; flex-direction: column; gap: 1px; }
+.strow { display: flex; gap: 12px; padding: 3px 10px; font-family: var(--mono); font-size: 12px; border-radius: 4px; cursor: pointer; align-items: baseline; }
+.strow:hover { background: rgba(77,159,255,.08); }
+.strow .so { color: var(--dim2); font-size: 10.5px; width: 110px; flex-shrink: 0; }
+.strow .sw { color: var(--accent2); font-size: 9px; width: 34px; flex-shrink: 0; }
+.strow .st { color: #c9d6ee; word-break: break-all; white-space: pre-wrap; }
+.strow .st b { color: var(--warn); font-weight: 600; }
+
+.hexwrap { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; font-family: var(--mono); font-size: 12px; overflow: auto; max-height: calc(100vh - 220px); }
+.hexrow { display: flex; gap: 0; white-space: nowrap; line-height: 1.65; }
+.hexrow .ho { color: var(--dim2); width: 96px; flex-shrink: 0; user-select: none; }
+.hexrow .hb { color: #9fb4dd; }
+.hexrow .hb .sel { background: rgba(77,159,255,.25); border-radius: 2px; }
+.hexrow .ha { color: #6f7d9c; margin-left: 18px; }
+.hexrow .ha .pr { color: #c9d6ee; }
+
+details.node { margin-left: 0; }
+details.node > summary { cursor: pointer; padding: 4px 8px; border-radius: 5px; display: flex; gap: 8px; align-items: center; font-family: var(--mono); font-size: 12px; }
+details.node > summary:hover { background: rgba(77,159,255,.07); }
+details.node > .children { margin-left: 18px; border-left: 1px solid var(--border); padding-left: 8px; }
+.treearr { color: var(--dim2); font-size: 10px; width: 12px; }
+.tagname { color: var(--accent2); }
+.attrlist { color: var(--dim); font-size: 11px; }
+.attrlist b { color: var(--warn); font-weight: 500; }
+
+.searchbar { margin-bottom: 10px; }
+.searchbar input { width: 100%; background: var(--panel2); border: 1px solid var(--border2); color: var(--text); border-radius: 7px; padding: 7px 12px; font-size: 12px; outline: none; font-family: var(--mono); }
+.searchbar input:focus { border-color: var(--accent); }
+
+code.block { display: block; background: #0d1220; border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-family: var(--mono); font-size: 11.5px; white-space: pre-wrap; word-break: break-all; color: #b8c6e4; max-height: 400px; overflow: auto; line-height: 1.5; }
+
+#dropOverlay {
+  position: fixed; inset: 0; background: rgba(8,12,22,.82); z-index: 100;
+  display: none; align-items: center; justify-content: center; flex-direction: column; gap: 12px;
+  border: 3px dashed var(--accent); border-radius: 12px;
+}
+#dropOverlay .ic { font-size: 56px; }
+#dropOverlay .t { font-size: 18px; font-weight: 600; color: var(--accent); }
+
+#loading { position: fixed; inset: 0; background: rgba(8,12,22,.72); z-index: 99; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 16px; }
+.spinner { width: 42px; height: 42px; border: 3px solid var(--border2); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading .t { color: var(--dim); font-size: 13px; font-family: var(--mono); }
+
+#toasts { position: fixed; right: 18px; bottom: 44px; z-index: 200; display: flex; flex-direction: column; gap: 8px; }
+.toast { background: #1c2438; border: 1px solid var(--border2); border-left: 3px solid var(--bad); padding: 10px 14px; border-radius: 8px; font-size: 12.5px; max-width: 420px; box-shadow: 0 6px 24px rgba(0,0,0,.4); animation: fadein .15s ease; }
+.toast.ok { border-left-color: var(--good); }
+
+#statusbar {
+  height: 26px; background: var(--panel); border-top: 1px solid var(--border);
+  display: flex; align-items: center; padding: 0 14px; gap: 18px;
+  color: var(--dim2); font-size: 11px; font-family: var(--mono); flex-shrink: 0;
+}
+#statusbar .sb-right { margin-left: auto; }
+
+.permrow { display: flex; align-items: center; gap: 8px; padding: 5px 10px; background: var(--panel2); border: 1px solid var(--border); border-radius: 7px; margin-bottom: 5px; font-family: var(--mono); font-size: 11.5px; }
+.permrow .sev { font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 3px; }
+.permrow .sev.danger { background: rgba(255,107,107,.15); color: var(--bad); }
+.permrow .sev.normal { background: rgba(108,182,255,.12); color: var(--info); }
+
+.dexcard { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+.dexcard .hdr { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; }
+.dexcard .hdr .nm { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--accent); }
+.statgrid { display: flex; gap: 10px; flex-wrap: wrap; }
+.stat { background: var(--panel2); border: 1px solid var(--border); border-radius: 7px; padding: 8px 14px; min-width: 90px; }
+.stat .n { font-family: var(--mono); font-size: 17px; font-weight: 600; color: var(--text); }
+.stat .l { font-size: 9.5px; color: var(--dim2); text-transform: uppercase; letter-spacing: .6px; margin-top: 2px; }
+.stat.warn .n { color: var(--bad); }
+.stat.good .n { color: var(--good); }
+
+.empty { color: var(--dim2); font-style: italic; padding: 16px 0; }
+a { color: var(--accent); }
+.mono { font-family: var(--mono); }
+.dimt { color: var(--dim); }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div id="logo">
+    <div class="mark">&gt;_</div>
+    <div>
+      <div class="name">Code<span>Break</span></div>
+      <div class="tag">BINARY ANALYSIS SUITE</div>
+    </div>
+  </div>
+  <button id="openBtn">&#128193; Open File</button>
+  <div id="fileChip">
+    <span id="fmtBadge"></span>
+    <span class="fname" id="chipName"></span>
+    <span class="fsize" id="chipSize"></span>
+  </div>
+  <span id="perfChip"></span>
+</div>
+
+<div id="main">
+  <div id="sidebar"></div>
+  <div id="content">
+    <div class="welcome" id="welcome">
+      <div class="bigic">&#129517;</div>
+      <h2>Drop a binary anywhere, or open a file</h2>
+      <div>Supports <b>PE (EXE/DLL/SYS)</b> · <b>APK / ZIP / JAR</b> · <b>DEX</b> · <b>ELF</b> · <b>Mach-O</b> · <b>Java class</b></div>
+      <div>or press <kbd>Ctrl+O</kbd></div>
+    </div>
+    <div id="pages"></div>
+  </div>
+</div>
+
+<div id="statusbar">
+  <span id="sbPath">No file loaded</span>
+  <span id="sbHash"></span>
+  <span class="sb-right">CodeBreak</span>
+</div>
+
+<div id="loading"><div class="spinner"></div><div class="t" id="loadingText">Analyzing&#8230;</div></div>
+<div id="dropOverlay"><div class="ic">&#128230;</div><div class="t">Drop file to analyze</div></div>
+<div id="toasts"></div>
+
+<script>
+"use strict";
+
+const $ = s => document.querySelector(s);
+const state = {
+  data: null,
+  pending: new Map(),
+  reqId: 1,
+  tab: "overview",
+  strings: { items: [], total: 0, loading: false, minLen: 4, kind: 0, filter: "", exhausted: false },
+  hex: { base: 0, rows: [] },
+};
+
+function toast(msg, ok) {
+  const t = document.createElement("div");
+  t.className = "toast" + (ok ? " ok" : "");
+  t.textContent = msg;
+  $("#toasts").appendChild(t);
+  setTimeout(() => t.remove(), 4200);
+}
+
+function send(cmd, extra) {
+  return new Promise((resolve, reject) => {
+    const id = state.reqId++;
+    const msg = Object.assign({ id, cmd }, extra || {});
+    state.pending.set(id, { resolve, reject });
+    window.chrome.webview.postMessage(msg);
+    setTimeout(() => {
+      if (state.pending.has(id)) {
+        state.pending.delete(id);
+        reject(new Error("request timeout"));
+      }
+    }, 120000);
+  });
+}
+
+window.chrome.webview.addEventListener("message", ev => {
+  const m = ev.data;
+  if (m.event === "drop") {
+    if (m.paths && m.paths.length) analyzeFile(m.paths[0]);
+    return;
+  }
+  const p = state.pending.get(m.id);
+  if (!p) return;
+  state.pending.delete(m.id);
+  if (m.ok) p.resolve(m.data);
+  else p.reject(new Error(m.error || "request failed"));
+});
+
+function fmtBytes(n) {
+  if (n === undefined || n === null) return "";
+  if (n >= 1073741824) return (n / 1073741824).toFixed(2) + " GB";
+  if (n >= 1048576) return (n / 1048576).toFixed(2) + " MB";
+  if (n >= 1024) return (n / 1024).toFixed(2) + " KB";
+  return n + " B";
+}
+function hx(n, w) { return "0x" + (n >>> 0).toString(16).padStart(w || 0, "0"); }
+function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;"); }
+
+async function openDialog() {
+  try {
+    const r = await send("open");
+    if (r && r.path) analyzeFile(r.path);
+  } catch (e) { toast("Open failed: " + e.message); }
+}
+
+async function analyzeFile(path) {
+  $("#loading").style.display = "flex";
+  $("#loadingText").textContent = "Analyzing " + path.split(/[\\/]/).pop() + "\u2026";
+  try {
+    const data = await send("analyze", { path });
+    state.data = data;
+    state.tab = "overview";
+    state.strings = { items: [], total: 0, loading: false, minLen: 4, kind: 0, filter: "", exhausted: false };
+    state.hex = { base: 0, rows: [] };
+    buildTabs(data);
+    renderAll();
+    $("#fileChip").style.display = "flex";
+    $("#chipName").textContent = data.file.name;
+    $("#chipSize").textContent = data.file.sizeHuman;
+    $("#fmtBadge").textContent = data.format.label;
+    $("#perfChip").textContent = data.analysisMs !== undefined ? "analyzed in " + data.analysisMs + " ms" : "";
+    $("#sbPath").textContent = data.file.path;
+    $("#sbHash").textContent = "SHA-256 " + data.hashes.sha256.slice(0, 24) + "\u2026";
+    $("#welcome").style.display = "none";
+  } catch (e) {
+    toast("Analysis failed: " + e.message);
+  } finally {
+    $("#loading").style.display = "none";
+  }
+}
+
+const TAB_ICONS = {
+  overview: "\u25CE", headers: "\u2261", sections: "\u2630", imports: "\u21C4", exports: "\u21C0",
+  resources: "\u2699", strings: "\u201C", hex: "#", manifest: "\u263C", dex: "\u2622",
+  entries: "\u25A3", elfseg: "\u2192", elfsec: "\u2630", macho: "\u2318", javaclass: "\u2615",
+};
+
+function buildTabs(d) {
+  const tabs = [{ id: "overview", label: "Overview" }];
+  if (d.pe) {
+    tabs.push({ id: "headers", label: "Headers" });
+    tabs.push({ id: "sections", label: "Sections", cnt: d.pe.sections.length });
+    tabs.push({ id: "imports", label: "Imports", cnt: d.pe.imports.length });
+    if (d.pe.exports && d.pe.exports.symbols && d.pe.exports.symbols.length) tabs.push({ id: "exports", label: "Exports", cnt: d.pe.exports.symbols.length });
+    tabs.push({ id: "resources", label: "Resources" });
+  }
+  if (d.apk) {
+    tabs.push({ id: "manifest", label: "Android" });
+    tabs.push({ id: "dex", label: "DEX", cnt: d.apk.dex.length });
+  }
+  if (d.zip) tabs.push({ id: "entries", label: "Archive", cnt: d.zip.entryCount });
+  if (d.elf) {
+    tabs.push({ id: "elfseg", label: "Segments", cnt: d.elf.programHeaders.length });
+    tabs.push({ id: "elfsec", label: "Sections", cnt: d.elf.sections.length });
+  }
+  if (d.macho) tabs.push({ id: "macho", label: "Load Commands", cnt: d.macho.loadCommands.length });
+  if (d.javaclass) tabs.push({ id: "javaclass", label: "Class Info" });
+  tabs.push({ id: "strings", label: "Strings", cnt: d.stringsInfo.total });
+  tabs.push({ id: "hex", label: "Hex View" });
+  const sb = $("#sidebar");
+  sb.innerHTML = "";
+  for (const t of tabs) {
+    const el = document.createElement("div");
+    el.className = "navtab";
+    el.dataset.tab = t.id;
+    el.innerHTML = "<span class='ic'>" + (TAB_ICONS[t.id] || "\u2022") + "</span><span>" + esc(t.label) + "</span>" +
+      (t.cnt !== undefined ? "<span class='cnt'>" + t.cnt + "</span>" : "");
+    el.onclick = () => selectTab(t.id);
+    sb.appendChild(el);
+  }
+  $("#pages").innerHTML = tabs.map(t => "<div class='page' id='page-" + t.id + "'></div>").join("");
+  selectTab("overview");
+}
+
+function selectTab(id) {
+  state.tab = id;
+  document.querySelectorAll(".navtab").forEach(n => n.classList.toggle("active", n.dataset.tab === id));
+  document.querySelectorAll(".page").forEach(p => p.classList.toggle("active", p.id === "page-" + id));
+  if (id === "strings") ensureStringsPage();
+  if (id === "hex") ensureHexPage();
+}
+
+function renderAll() {
+  renderOverview();
+  if (state.data.pe) { renderHeaders(); renderSections(); renderImports(); renderExports(); renderResources(); }
+  if (state.data.apk) { renderManifest(); renderDex(); }
+  if (state.data.zip) renderEntries();
+  if (state.data.elf) { renderElfSeg(); renderElfSec(); }
+  if (state.data.macho) renderMacho();
+  if (state.data.javaclass) renderJava();
+}
+
+function page(id) { return $("#page-" + id); }
+function kvRow(k, v, click) {
+  if (v === undefined || v === null || v === "") return "";
+  return "<div class='kv'><span class='k'>" + esc(k) + "</span><span class='v" + (click ? " click' data-jump='" + click : "") + "'>" + v + "</span></div>";
+}
+function badges(list, cls) { return list.map(x => "<span class='badge " + (cls || "b-gray") + "'>" + esc(x) + "</span>").join(" "); }
+function entropyColor(e) {
+  if (e >= 7.5) return "#ff6b6b";
+  if (e >= 7.0) return "#f5a451";
+  if (e >= 6.0) return "#f5c451";
+  if (e >= 4.0) return "#6cb6ff";
+  return "#3fd68f";
+}
+function ebar(e) {
+  return "<div class='ebar' title='entropy " + e.toFixed(3) + "'><div class='fill' style='width:" + (e / 8 * 100).toFixed(1) + "%;background:" + entropyColor(e) + "'></div></div>";
+}
+
+function jumpHex(off) {
+  selectTab("hex");
+  hexGoto(off);
+}
+
+document.addEventListener("click", ev => {
+  const j = ev.target.closest("[data-jump]");
+  if (j) jumpHex(parseInt(j.dataset.jump, 10));
+});
+
+function renderOverview() {
+  const d = state.data;
+  const p = page("overview");
+  let h = "";
+  h += "<div class='grid g2'>";
+  h += "<div class='card'><h4>File</h4>" +
+    kvRow("Name", esc(d.file.name)) +
+    kvRow("Path", esc(d.file.path)) +
+    kvRow("Size", esc(d.file.sizeHuman) + " <span class='dimt'>(" + d.file.size.toLocaleString() + " bytes)</span>") +
+    kvRow("Detected format", "<span class='badge b-blue'>" + esc(d.format.label) + "</span>") +
+    kvRow("Modified", esc(d.file.modified || "\u2014")) +
+    kvRow("Created", esc(d.file.created || "\u2014")) +
+    kvRow("Magic (16B)", "<span class='dimt'>" + esc(d.magic.replace(/(..)/g, "$1 ").trim()) + "</span>") +
+    "</div>";
+  h += "<div class='card'><h4>Hashes</h4>";
+  for (const al of ["md5", "sha1", "sha256"]) {
+    const v = d.hashes[al];
+    h += "<div class='hashrow'><span class='hk'>" + al.toUpperCase() + "</span><span class='hv'>" + v + "</span>" +
+      "<button class='copybtn' data-copy='" + v + "'>copy</button></div>";
+  }
+  h += "<div class='hashrow'><span class='hk'>CRC32</span><span class='hv'>" + d.hashes.crc32 + "</span></div>";
+  h += "</div>";
+  h += "</div>";
+
+  h += "<h3 class='sec'>Entropy</h3><div class='card'>";
+  h += "<div style='display:flex;gap:26px;align-items:center;margin-bottom:10px'>";
+  h += "<div><div style='font-size:26px;font-family:var(--mono);font-weight:600;color:" + entropyColor(d.entropy.overall) + "'>" + d.entropy.overall.toFixed(3) + "</div><div class='dimt' style='font-size:10px;text-transform:uppercase;letter-spacing:.6px'>overall (0\u20138 bits/byte)</div></div>";
+  if (d.entropy.blocks.length > 1) h += "<div style='flex:1;position:relative'><canvas id='entropyCanvas'></canvas><div class='enthover' id='enthover'></div></div>";
+  h += "</div>";
+  h += "<div class='dimt' style='font-size:11px'>Block size: " + fmtBytes(d.entropy.blockSize) + " · " + d.entropy.blocks.length + " blocks sampled</div></div>";
+
+  if (d.pe) {
+    const quick = [];
+    quick.push(["Machine", esc(d.pe.machine)]);
+    quick.push(["Compiled", esc(d.pe.timestamp || "\u2014")]);
+    if (d.pe.entryPointSection) quick.push(["Entry point", hx(d.pe.entryPointRva) + " <span class='dimt'>(" + esc(d.pe.entryPointSection) + ")</span>"]);
+    quick.push(["Signed", d.pe.security.signed ? "<span class='badge b-green'>YES</span>" : "<span class='badge b-yellow'>NO</span>"]);
+    quick.push([".NET", d.pe.dotnet ? "<span class='badge b-purple'>managed</span>" : "<span class='badge b-gray'>native</span>"]);
+    if (d.pe.debug && d.pe.debug.entries) {
+      const pdb = d.pe.debug.entries.find(e => e.pdb);
+      if (pdb) quick.push(["PDB path", "<span style='color:var(--warn)'>" + esc(pdb.pdb) + "</span>"]);
+    }
+    h += "<h3 class='sec'>Binary Profile</h3><div class='card'>" + quick.map(q => kvRow(q[0], q[1])).join("") + "</div>";
+  }
+
+  h += "<h3 class='sec'>Assessment <span class='dimt' style='text-transform:none;letter-spacing:0'>(" + d.indicators.length + " findings)</span></h3>";
+  if (!d.indicators.length) h += "<div class='card'><div class='empty'>No notable findings.</div></div>";
+  else {
+    const order = { high: 0, medium: 1, info: 2, critical: -1 };
+    const inds = d.indicators.slice().sort((a, b) => (order[a.severity] ?? 9) - (order[b.severity] ?? 9));
+    h += inds.map(i => {
+      const cls = i.severity === "high" ? "s2" : i.severity === "medium" ? "s1" : "s0";
+      return "<div class='ind " + cls + "'><div class='dot'></div><div><div class='t'>" + esc(i.title) + " <span class='badge " +
+        (i.severity === "high" ? "b-red" : i.severity === "medium" ? "b-yellow" : "b-blue") + "'>" + i.severity + "</span></div><div class='d'>" + esc(i.detail) + "</div></div></div>";
+    }).join("");
+  }
+  p.innerHTML = h;
+  drawEntropy();
+}
+
+function drawEntropy() {
+  const cv = $("#entropyCanvas");
+  if (!cv) return;
+  const blocks = state.data.entropy.blocks;
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth || 600, hgt = 140;
+  cv.width = w * dpr; cv.height = hgt * dpr;
+  const ctx = cv.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, hgt);
+  ctx.strokeStyle = "rgba(255,255,255,0.05)";
+  for (let i = 1; i < 8; i++) {
+    const y = hgt - (i / 8) * hgt;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+  const bw = w / blocks.length;
+  for (let i = 0; i < blocks.length; i++) {
+    const e = blocks[i].e;
+    const bh = Math.max(1, (e / 8) * (hgt - 4));
+    ctx.fillStyle = entropyColor(e);
+    ctx.globalAlpha = 0.88;
+    ctx.fillRect(i * bw, hgt - bh, Math.max(bw - 0.5, 0.5), bh);
+  }
+  cv.onmousemove = ev => {
+    const rect = cv.getBoundingClientRect();
+    const i = Math.min(blocks.length - 1, Math.max(0, Math.floor((ev.clientX - rect.left) / rect.width * blocks.length)));
+    const tip = $("#enthover");
+    tip.style.display = "block";
+    tip.style.left = Math.min(rect.width - 160, ev.clientX - rect.left) + "px";
+    tip.style.top = (ev.clientY - rect.top - 44) + "px";
+    tip.innerHTML = "offset " + hx(blocks[i].off) + "<br>entropy " + blocks[i].e.toFixed(4);
+  };
+  cv.onmouseleave = () => { const tip = $("#enthover"); if (tip) tip.style.display = "none"; };
+}
+
+function renderHeaders() {
+  const pe = state.data.pe;
+  const p = page("headers");
+  let h = "";
+  h += "<div class='grid g2'>";
+  h += "<div class='card'><h4>General</h4>" +
+    kvRow("Machine", esc(pe.machine) + " <span class='dimt'>" + pe.machineRaw + "</span>") +
+    kvRow("Bitness", pe.bitness + "-bit") +
+    kvRow("Compile timestamp", esc(pe.timestamp || "\u2014") + " <span class='dimt'>(" + pe.timestampRaw + ")</span>") +
+    kvRow("Linker version", esc(pe.linkerVersion)) +
+    kvRow("Entry point (RVA)", hx(pe.entryPointRva) + (pe.entryPointSection ? " <span class='dimt'>(" + esc(pe.entryPointSection) + ")</span>" : "")) +
+    kvRow("Image base", esc(pe.imageBase)) +
+    kvRow("Subsystem", esc(pe.subsystem)) +
+    kvRow("OS version", esc(pe.osVersion)) +
+    kvRow("Subsystem version", esc(pe.subsystemVersion)) +
+    kvRow("Image version", esc(pe.imageVersion)) +
+    kvRow("Section alignment", hx(pe.sectionAlignment)) +
+    kvRow("File alignment", hx(pe.fileAlignment)) +
+    kvRow("Size of image", pe.sizeOfImage.toLocaleString()) +
+    kvRow("Size of headers", pe.sizeOfHeaders.toLocaleString()) +
+    kvRow("Size of code", pe.sizeOfCode.toLocaleString()) +
+    kvRow("Checksum", (pe.checksumValid ? "<span class='badge b-green'>valid</span> " : "<span class='badge b-yellow'>mismatch</span> ") + pe.checksumStored + " <span class='dimt'>calc " + pe.checksumComputed + "</span>") +
+    "</div>";
+  h += "<div class='card'><h4>Protection / Flags</h4>";
+  h += "<div class='kv'><span class='k'>DllCharacteristics</span><span class='v'>" + (pe.dllCharacteristics.length ? badges(pe.dllCharacteristics, "b-blue") : "<span class='dimt'>none</span>") + "</span></div>";
+  h += "<div class='kv'><span class='k'>Characteristics</span><span class='v'>" + (pe.characteristics.length ? badges(pe.characteristics) : "<span class='dimt'>none</span>") + "</span></div>";
+  if (pe.rich && pe.rich.length) {
+    h += "<h4 style='margin-top:14px'>Rich Header (build tools)</h4><table class='tbl'><tr><th>Tool</th><th>Product ID</th><th>Build</th><th>Objects</th></tr>";
+    for (const r of pe.rich) h += "<tr><td>" + esc(r.tool || "unknown") + "</td><td class='dim'>" + r.productId + "</td><td class='dim'>" + r.build + "</td><td>" + r.count + "</td></tr>";
+    h += "</table>";
+  } else h += "<div class='dimt' style='margin-top:14px;font-size:11px'>No Rich header (not built with MSVC, or stripped).</div>";
+  h += "</div>";
+  h += "</div>";
+
+  if (pe.debug && pe.debug.entries && pe.debug.entries.length) {
+    h += "<h3 class='sec'>Debug Directory</h3><div class='tblwrap'><table class='tbl'><tr><th>Type</th><th>Size</th><th>File offset</th><th>PDB</th><th>GUID</th><th>Age</th></tr>";
+    for (const e of pe.debug.entries) h += "<tr><td>" + esc(e.typeName) + "</td><td class='dim'>" + e.size + "</td><td class='dim'>" + e.rawOffset + "</td><td>" + (e.pdb ? "<span style='color:var(--warn)'>" + esc(e.pdb) + "</span>" : "\u2014") + "</td><td class='dim'>" + (e.pdbGuid || "\u2014") + "</td><td class='dim'>" + (e.pdbAge !== undefined ? e.pdbAge : "\u2014") + "</td></tr>";
+    h += "</table></div>";
+  }
+
+  if (pe.tls && pe.tls.present) {
+    h += "<h3 class='sec'>TLS Directory</h3><div class='card'>" +
+      kvRow("Callbacks VA", esc(pe.tls.callbacksVa)) +
+      kvRow("Callback count", "<span style='color:var(--warn)'>" + (pe.tls.callbackCount || 0) + "</span>") +
+      kvRow("Callbacks", pe.tls.callbacks.map(c => "<span class='badge b-yellow'>" + esc(c) + "</span>").join(" ")) +
+      "</div>";
+  }
+
+  if (pe.security && pe.security.signed) {
+    h += "<h3 class='sec'>Digital Signatures</h3><div class='tblwrap'><table class='tbl'><tr><th>Type</th><th>Length</th><th>Revision</th></tr>";
+    for (const c of pe.security.certificates) h += "<tr><td>" + esc(c.type) + "</td><td>" + fmtBytes(c.length) + "</td><td class='dim'>" + c.revision + "</td></tr>";
+    h += "</table></div>";
+  }
+
+  if (pe.clr && pe.clr.present) {
+    h += "<h3 class='sec'>.NET / CLR</h3><div class='card'>" +
+      kvRow("Runtime version", esc(pe.clr.runtimeVersion)) +
+      kvRow("Metadata size", fmtBytes(pe.clr.metadataSize)) +
+      kvRow("Entry point token", esc(pe.clr.entryPointToken)) +
+      kvRow("Flags", badges(pe.clr.flags, "b-purple")) +
+      (pe.clr.metadataStreams ? kvRow("Metadata streams", pe.clr.metadataStreams.map(s => "<span class='badge b-purple'>" + esc(s.name) + " " + s.size + "B</span>").join(" ")) : "") +
+      "</div>";
+  }
+
+  h += "<h3 class='sec'>Data Directories</h3><div class='tblwrap'><table class='tbl'><tr><th>#</th><th>Name</th><th>RVA</th><th>Size</th></tr>";
+  for (const d of pe.directories) h += "<tr><td class='dim'>" + d.index + "</td><td>" + esc(d.name) + "</td><td class='dim'>" + (d.rva ? hx(d.rva) : "\u2014") + "</td><td class='dim'>" + (d.size ? d.size.toLocaleString() : "\u2014") + "</td></tr>";
+  h += "</table></div>";
+
+  if (pe.overlay && pe.overlay.present) {
+    h += "<h3 class='sec'>Overlay</h3><div class='card'>" + kvRow("Overlay size", fmtBytes(pe.overlay.size), pe.overlay.offset) + kvRow("Starts at offset", pe.overlay.offset) + "<div class='dimt' style='font-size:11.5px'>Data appended after the last section \u2014 common in installers and self-extracting archives.</div></div>";
+  }
+  if (pe.notes && pe.notes.length) {
+    h += "<h3 class='sec'>Parse Notes</h3><div class='card'>" + pe.notes.map(n => "<div style='padding:2px 0;color:var(--dim);font-size:11.5px'>&#9888; " + esc(n) + "</div>").join("") + "</div>";
+  }
+  p.innerHTML = h;
+}
+
+function renderSections() {
+  const pe = state.data.pe;
+  let h = "<div class='tblwrap'><table class='tbl'><tr><th>Name</th><th>Virtual addr</th><th>Virtual size</th><th>Raw offset</th><th>Raw size</th><th>Entropy</th><th>RWX</th><th>Flags</th></tr>";
+  for (const s of pe.sections) {
+    const rwx = (s.executable ? "X" : "") + (s.writable ? "W" : "") + "R";
+    h += "<tr class='click' data-jump='" + s.rawOffset + "'><td>" + esc(s.name) + (s.suspicious ? " <span class='badge b-red'>suspicious</span>" : "") + "</td>" +
+      "<td class='dim'>" + hx(s.virtualAddress) + "</td><td class='dim'>" + s.virtualSize.toLocaleString() + "</td>" +
+      "<td class='dim'>" + s.rawOffset + "</td><td class='dim'>" + s.rawSize.toLocaleString() + "</td>" +
+      "<td>" + ebar(s.entropy) + " <span class='dimt'>" + s.entropy.toFixed(2) + "</span></td>" +
+      "<td><span class='badge " + (s.executable && s.writable ? "b-red" : s.executable ? "b-yellow" : "b-gray") + "'>" + rwx + "</span></td>" +
+      "<td class='dim' style='white-space:normal'>" + s.flags.slice(0, 5).map(esc).join(", ") + "</td></tr>";
+  }
+  h += "</table></div>";
+  page("sections").innerHTML = h;
+}
+
+function renderImports() {
+  const pe = state.data.pe;
+  const p = page("imports");
+  let h = "<div class='toolbar'><input type='text' id='impFilter' placeholder='Filter imports\u2026'><span class='meta'>" +
+    pe.imports.length + " libraries · " + pe.importFunctionTotal.toLocaleString() + " functions</span></div>";
+  h += "<div id='impList'>";
+  h += pe.imports.map((imp, i) =>
+    "<details class='node' open='" + (pe.imports.length <= 6) + "' data-dll='" + esc(imp.dll) + "' data-fns='" + esc(imp.functions.map(f => f.name).join("\n")) + "'>" +
+    "<summary><span class='tagname'>" + esc(imp.dll) + "</span> <span class='badge b-blue'>" + imp.count + "</span></summary>" +
+    "<div class='children' style='padding:6px 0 6px 8px'>" +
+    imp.functions.map(f => "<div class='strow' style='cursor:default'><span class='so'>&nbsp;</span><span class='st'>" +
+      (f.ordinal !== undefined ? "<span class='badge b-purple'>ordinal</span> " + f.name : esc(f.name) + " <span class='dimt'>hint " + f.hint + "</span>") + "</span></div>").join("") +
+    "</div></details>").join("");
+  h += "</div>";
+  if (!pe.imports.length) h += "<div class='empty'>No import directory \u2014 typical of packed binaries.</div>";
+  p.innerHTML = h;
+  const inp = $("#impFilter");
+  if (inp) inp.oninput = () => {
+    const q = inp.value.toLowerCase();
+    document.querySelectorAll("#impList details").forEach(d => {
+      const dll = d.dataset.dll.toLowerCase();
+      const fns = d.dataset.fns.toLowerCase();
+      const show = !q || dll.includes(q) || fns.includes(q);
+      d.style.display = show ? "" : "none";
+      if (q && fns.includes(q)) {
+        const inner = d.querySelector(".children");
+        for (const row of inner.querySelectorAll(".strow")) {
+          const t = row.textContent.toLowerCase();
+          row.style.display = !q || t.includes(q) ? "" : "none";
+        }
+        d.open = true;
+      } else {
+        d.querySelectorAll(".strow").forEach(r => r.style.display = "");
+        d.open = !q && pe.imports.length <= 6;
+      }
+    });
+  };
+}
+
+function renderExports() {
+  const pe = state.data.pe;
+  const ex = pe.exports;
+  let h = "<div class='toolbar'><input type='text' id='expFilter' placeholder='Filter exports\u2026'><span class='meta'>" +
+    (ex.name ? esc(ex.name) + " · " : "") + ex.functionCount + " functions · " + ex.namedCount + " named · base " + ex.ordinalBase + "</span></div>";
+  h += "<div class='tblwrap'><table class='tbl' id='expTbl'><tr><th>Ordinal</th><th>Name</th><th>RVA</th><th>File offset</th><th>Forwarder</th></tr>";
+  for (const s of ex.symbols || []) {
+    h += "<tr class='click' data-jump='" + s.fileOffset + "'><td>" + s.ordinal + "</td><td>" + esc(s.name || "\u2014") + "</td><td class='dim'>" + hx(s.rva) + "</td><td class='dim'>" + (s.fileOffset ? s.fileOffset : "\u2014") + "</td><td class='dim'>" + esc(s.forwarder || "\u2014") + "</td></tr>";
+  }
+  h += "</table></div>";
+  if (!ex.symbols || !ex.symbols.length) h += "<div class='empty'>No exports.</div>";
+  page("exports").innerHTML = h;
+  const inp = $("#expFilter");
+  if (inp) inp.oninput = () => {
+    const q = inp.value.toLowerCase();
+    document.querySelectorAll("#expTbl tr").forEach(tr => {
+      if (tr.querySelector("th")) return;
+      tr.style.display = tr.textContent.toLowerCase().includes(q) ? "" : "none";
+    });
+  };
+}
+
+function renderResources() {
+  const r = state.data.pe.resources;
+  const p = page("resources");
+  let h = "";
+  const vi = r.versionInfo;
+  if (vi && (vi.strings.length || vi.fileVersion)) {
+    h += "<h3 class='sec'>Version Info</h3><div class='card'>";
+    if (vi.fileVersion) h += kvRow("FileVersion (fixed)", esc(vi.fileVersion));
+    if (vi.productVersion) h += kvRow("ProductVersion (fixed)", esc(vi.productVersion));
+    h += vi.strings.map(s => kvRow(s.key, esc(s.value))).join("");
+    h += "</div>";
+  }
+  if (r.manifest) {
+    h += "<h3 class='sec'>Embedded Manifest</h3><code class='block'>" + esc(r.manifest) + "</code>";
+  }
+  h += "<h3 class='sec'>Resource Tree</h3>";
+  if (!r.types.length) h += "<div class='empty'>No resources.</div>";
+  else {
+    const renderNode = (node, depth) => {
+      let s = "<details class='node'" + (depth < 1 ? " open" : "") + "><summary><span class='tagname'>" + esc(node.name || node.id) + "</span>";
+      s += "</summary><div class='children'>";
+      for (const n2 of node.names) {
+        s += "<details class='node'" + (depth < 1 ? " open" : "") + "><summary><span class='tagname'>" + esc(n2.name || n2.id) + "</span> <span class='badge b-gray'>" + n2.languages.length + " lang</span></summary><div class='children'>";
+        for (const l of n2.languages) {
+          s += "<div class='strow' data-jump-hex='" + l.offset + "'><span class='so'>lang " + l.lang + "</span><span class='st dimt'>size " + l.size + " · rva " + hx(l.rva) + " · file " + l.offset + "</span></div>";
+        }
+        s += "</div></details>";
+      }
+      s += "</div></details>";
+      return s;
+    };
+    h += "<div class='card'>" + r.types.map(t => renderNode(t, 0)).join("") + "</div>";
+  }
+  p.innerHTML = h;
+  p.querySelectorAll("[data-jump-hex]").forEach(el => el.onclick = () => jumpHex(parseInt(el.dataset.jumpHex, 10)));
+}
+
+function renderManifest() {
+  const d = state.data;
+  const a = d.apk, m = a.manifest;
+  const p = page("manifest");
+  let h = "";
+  if (!m.parsed) {
+    h += "<div class='ind s1'><div class='dot'></div><div><div class='t'>Manifest could not be parsed</div><div class='d'>The binary manifest was found but could not be decoded.</div></div></div>";
+  } else {
+    h += "<div class='grid g2'>";
+    h += "<div class='card'><h4>Identity</h4>" +
+      kvRow("Package", "<span style='color:var(--accent)'>" + esc(m.package || "\u2014") + "</span>") +
+      kvRow("Version name", esc(m.versionName || "\u2014")) +
+      kvRow("Version code", esc(m.versionCode || "\u2014")) +
+      kvRow("Min SDK", esc(m.minSdk || "\u2014")) +
+      kvRow("Target SDK", esc(m.targetSdk || "\u2014")) +
+      kvRow("Label", esc(m.applicationLabel || "\u2014")) +
+      kvRow("Main activity", esc(m.mainActivity || "\u2014")) +
+      "</div>";
+    h += "<div class='card'><h4>Hardening</h4>" +
+      kvRow("Debuggable", m.debuggable ? "<span class='badge b-red'>true</span>" : "<span class='badge b-green'>false</span>") +
+      kvRow("Allow backup", m.allowBackup ? "<span class='badge b-yellow'>true</span>" : "<span class='badge b-green'>false</span>") +
+      kvRow("Cleartext traffic", m.usesCleartextTraffic ? "<span class='badge b-yellow'>allowed</span>" : "<span class='badge b-gray'>not declared</span>") +
+      kvRow("Signing v1 (JAR)", a.signing.v1Jarsigned ? "<span class='badge b-green'>present</span>" : "<span class='badge b-gray'>absent</span>") +
+      kvRow("Signing v2", a.signing.v2 ? "<span class='badge b-green'>present</span>" : "<span class='badge b-gray'>absent</span>") +
+      kvRow("Signing v3", a.signing.v3 ? "<span class='badge b-green'>present</span>" : "<span class='badge b-gray'>absent</span>") +
+      kvRow("Cert files", a.signing.certFiles.map(esc).join("<br>") || "\u2014") +
+      kvRow("resources.arsc", a.resourcesArsc ? "present" : "missing") +
+      kvRow("Native ABIs", Object.keys(a.nativeLibs).length ? Object.keys(a.nativeLibs).map(x => "<span class='badge b-blue'>" + esc(x) + "</span>").join(" ") : "none") +
+      "</div>";
+    h += "</div>";
+
+    if (m.permissions.length) {
+      const danger = new Set(m.dangerousPermissions);
+      h += "<h3 class='sec'>Permissions (" + m.permissions.length + ")</h3><div class='grid g2'>";
+      h += "<div>";
+      for (const perm of m.permissions) {
+        const shortName = perm.replace("android.permission.", "");
+        h += "<div class='permrow'><span class='sev " + (danger.has(perm) ? "danger" : "normal") + "'>" + (danger.has(perm) ? "SENSITIVE" : "normal") + "</span>" + shortName + "</div>";
+      }
+      h += "</div><div>";
+      if (m.features.length) {
+        h += "<h4 style='font-size:11px;text-transform:uppercase;color:var(--dim);margin-bottom:8px'>Uses-feature</h4>";
+        for (const f of m.features) h += "<div class='permrow'><span class='sev normal'>feature</span>" + esc(f) + "</div>";
+      }
+      h += "</div></div>";
+    }
+
+    h += "<h3 class='sec'>Components</h3><div class='grid g2'>";
+    const groups = [["activity", "Activities"], ["service", "Services"], ["receiver", "Receivers"], ["provider", "Providers"], ["activityAlias", "Activity aliases"]];
+    for (const [key, label] of groups) {
+      const list = m.components[key] || [];
+      if (!list.length) continue;
+      h += "<div class='card'><h4>" + label + " (" + list.length + ")</h4>";
+      for (const c of list) {
+        h += "<div class='permrow'><span class='sev " + (c.exported ? "danger" : "normal") + "'>" + (c.exported ? "exported" : "internal") + "</span>" + esc(c.name.split(".").pop()) + " <span class='dimt' style='font-size:10px'>" + esc(c.name) + "</span></div>";
+      }
+      h += "</div>";
+    }
+    h += "</div>";
+  }
+
+  if (m.tree) {
+    h += "<h3 class='sec'>Raw Manifest (binary XML)</h3><div class='card'>";
+    const renderTree = (node, depth) => {
+      let s = "<details class='node'" + (depth < 2 ? " open" : "") + "><summary><span class='trearr'>&#9656;</span><span class='tagname'>&lt;" + esc(node.tag) + "</span><span class='attrlist'>" +
+        node.attrs.map(a => " <b>" + esc(a.name) + "</b>=\"" + esc(a.value) + "\"").join("") + "&gt;</span></summary><div class='children'>";
+      for (const c of node.children) s += renderTree(c, depth + 1);
+      s += "</div></details>";
+      return s;
+    };
+    h += renderTree(m.tree, 0);
+    h += "</div>";
+  }
+  p.innerHTML = h;
+}
+
+function renderDex() {
+  const p = page("dex");
+  let h = "";
+  for (const dex of state.data.apk.dex) {
+    h += "<div class='dexcard'>";
+    h += "<div class='hdr'><span class='nm'>" + esc(dex.name) + "</span><span class='badge b-gray'>dex " + esc(dex.version) + "</span>" +
+      (dex.checksumOk ? "<span class='badge b-green'>adler32 ok</span>" : "<span class='badge b-red'>adler32 mismatch</span>") +
+      (dex.signatureOk ? "<span class='badge b-green'>sha-1 ok</span>" : "<span class='badge b-red'>sha-1 mismatch</span>") +
+      (dex.fileSizeMatches === false ? "<span class='badge b-yellow'>size mismatch</span>" : "") + "</div>";
+    h += "<div class='statgrid'>";
+    const stats = [["Classes", dex.classCount], ["Methods", dex.methodCount], ["Fields", dex.fieldCount], ["Strings", dex.stringCount], ["Types", dex.typeCount], ["Protos", dex.protoCount]];
+    for (const [l, n] of stats) h += "<div class='stat'><div class='n'>" + n.toLocaleString() + "</div><div class='l'>" + l + "</div></div>";
+    h += "</div>";
+    if (dex.classes && dex.classes.length) {
+      h += "<div style='margin-top:12px' class='searchbar'><input type='text' placeholder='Filter classes\u2026' data-dexcls='" + esc(dex.name) + "'></div>";
+      h += "<div class='tblwrap'><table class='tbl' id='clstbl-" + esc(dex.name) + "'><tr><th>Class</th><th>Superclass</th><th>Access</th><th>Source</th></tr>";
+      for (const c of dex.classes) h += "<tr><td>" + esc(c.name) + "</td><td class='dim'>" + esc(c.super) + "</td><td>" + c.flags.map(f => "<span class='badge b-gray'>" + f + "</span>").join("") + "</td><td class='dim'>" + esc(c.source || "\u2014") + "</td></tr>";
+      h += "</table></div>";
+      if (dex.classesTruncated) h += "<div class='dimt' style='padding:8px 2px;font-size:11px'>Showing first " + dex.classes.length + " classes.</div>";
+    }
+    h += "</div>";
+  }
+  if (!state.data.apk.dex.length) h += "<div class='empty'>No classes.dex found in this package.</div>";
+  p.innerHTML = h;
+  p.querySelectorAll("input[data-dexcls]").forEach(inp => {
+    inp.oninput = () => {
+      const q = inp.value.toLowerCase();
+      const tbl = $("#clstbl-" + CSS.escape(inp.dataset.dexcls));
+      if (!tbl) return;
+      tbl.querySelectorAll("tr").forEach(tr => {
+        if (tr.querySelector("th")) return;
+        tr.style.display = tr.textContent.toLowerCase().includes(q) ? "" : "none";
+      });
+    };
+  });
+}
+
+function renderEntries() {
+  const z = state.data.zip;
+  const p = page("entries");
+  let h = "<div class='toolbar'><input type='text' id='zipFilter' placeholder='Filter entries\u2026'>" +
+    "<span class='meta'>" + z.entryCount.toLocaleString() + " entries" + (z.entriesTruncated ? " (list truncated)" : "") +
+    (z.zip64 ? " · ZIP64" : "") + (z.compressionOverall !== undefined ? " · overall compression " + z.compressionOverall + "%" : "") + "</span></div>";
+  if (z.signingBlocks && z.signingBlocks.length) {
+    h += "<div class='card' style='margin-bottom:12px'><h4>APK Signing Block</h4>" +
+      z.signingBlocks.map(s => "<span class='badge " + (s.id.includes("7109") || s.id.includes("f053") ? "b-green" : "b-gray") + "'>" + esc(s.name) + "</span>").join(" ") + "</div>";
+  }
+  h += "<div class='tblwrap' style='max-height:calc(100vh - 190px)'><table class='tbl' id='zipTbl'><tr><th>Name</th><th>Method</th><th>Size</th><th>Packed</th><th>Ratio</th><th>CRC32</th><th>Offset</th></tr>";
+  for (const e of z.entries) {
+    h += "<tr><td style='white-space:normal'>" + (e.dir ? "\u{1F4C1} " : "") + esc(e.name) + "</td><td class='dim'>" + esc(e.methodName) + "</td><td class='dim'>" + e.size.toLocaleString() + "</td><td class='dim'>" + e.compSize.toLocaleString() + "</td><td class='dim'>" + (e.ratio || "\u2014") + "</td><td class='dim'>" + e.crc32 + "</td><td class='dim'>" + e.offset + "</td></tr>";
+  }
+  h += "</table></div>";
+  p.innerHTML = h;
+  const inp = $("#zipFilter");
+  if (inp) inp.oninput = () => {
+    const q = inp.value.toLowerCase();
+    document.querySelectorAll("#zipTbl tr").forEach(tr => {
+      if (tr.querySelector("th")) return;
+      tr.style.display = tr.textContent.toLowerCase().includes(q) ? "" : "none";
+    });
+  };
+}
+
+function renderElfSeg() {
+  const e = state.data.elf;
+  let h = "<div class='card' style='margin-bottom:12px'><h4>Header</h4><div class='grid g2'>" +
+    kvRow("Class", esc(e.class)) + kvRow("Endianness", esc(e.endianness)) +
+    kvRow("Type", esc(e.type)) + kvRow("Machine", esc(e.machine)) +
+    kvRow("Entry point", esc(e.entry)) + kvRow("OS ABI", esc(e.osabi)) + "</div></div>";
+  h += "<div class='tblwrap'><table class='tbl'><tr><th>#</th><th>Type</th><th>Flags</th><th>Offset</th><th>VirtAddr</th><th>FileSize</th><th>MemSize</th><th>Interpreter</th></tr>";
+  for (const s of e.programHeaders) {
+    const cls = s.flags.includes("W") && s.flags.includes("X") ? "b-red" : s.flags.includes("X") ? "b-yellow" : "b-blue";
+    h += "<tr><td class='dim'>" + s.index + "</td><td>" + esc(s.type) + "</td><td><span class='badge " + cls + "'>" + s.flags + "</span></td><td class='dim'>" + s.offset + "</td><td class='dim'>" + s.vaddr + "</td><td class='dim'>" + s.fileSize.toLocaleString() + "</td><td class='dim'>" + s.memSize.toLocaleString() + "</td><td class='dim'>" + esc(s.interpreter || "\u2014") + "</td></tr>";
+  }
+  h += "</table></div>";
+  page("elfseg").innerHTML = h;
+}
+
+function renderElfSec() {
+  const e = state.data.elf;
+  let h = "<div class='tblwrap'><table class='tbl'><tr><th>#</th><th>Name</th><th>Type</th><th>Flags</th><th>Addr</th><th>Offset</th><th>Size</th><th>Entropy</th></tr>";
+  for (const s of e.sections) {
+    h += "<tr" + (s.offset && s.type !== "NOBITS" ? " class='click' data-jump='" + s.offset + "'" : "") + "><td class='dim'>" + s.index + "</td><td>" + esc(s.name || "\u2014") + "</td><td class='dim'>" + esc(s.type) + "</td><td><span class='badge " + (s.flags.includes("W") && s.flags.includes("X") ? "b-red" : "b-gray") + "'>" + s.flags + "</span></td><td class='dim'>" + s.addr + "</td><td class='dim'>" + s.offset + "</td><td class='dim'>" + s.size.toLocaleString() + "</td>" +
+      "<td>" + (s.entropy !== undefined ? ebar(s.entropy) + " <span class='dimt'>" + s.entropy.toFixed(2) + "</span>" : "\u2014") + "</td></tr>";
+  }
+  h += "</table></div>";
+  page("elfsec").innerHTML = h;
+}
+
+function renderMacho() {
+  const m = state.data.macho;
+  let h = "<div class='card' style='margin-bottom:12px'><h4>Header</h4><div class='grid g2'>" +
+    kvRow("CPU", esc(m.cputype)) + kvRow("File type", esc(m.filetype)) +
+    kvRow("Commands", m.commandCount + " (" + m.commandsSize + " bytes)") + kvRow("Flags", esc(m.flags)) + "</div></div>";
+  h += "<div class='tblwrap'><table class='tbl'><tr><th>#</th><th>Command</th><th>Segment</th><th>VMAddr</th><th>VMSize</th><th>File</th><th>Prot</th><th>Details</th></tr>";
+  for (const c of m.loadCommands) {
+    h += "<tr><td class='dim'>" + c.index + "</td><td>" + esc(c.name) + "</td><td>" + esc(c.segment || "\u2014") + "</td><td class='dim'>" + (c.vmaddr || "\u2014") + "</td><td class='dim'>" + (c.vmsize !== undefined ? c.vmsize.toLocaleString() : "\u2014") + "</td><td class='dim'>" + (c.fileOffset !== undefined ? c.fileOffset : "\u2014") + "</td><td>" + (c.protection ? "<span class='badge " + (c.protection.includes("W") && c.protection.includes("X") ? "b-red" : "b-blue") + "'>" + c.protection + "</span>" : "\u2014") + "</td><td class='dim'>" + (c.dylinker ? esc(c.dylinker) : (c.sectionCount !== undefined ? c.sectionCount + " sections" : "")) + "</td></tr>";
+  }
+  h += "</table></div>";
+  page("macho").innerHTML = h;
+}
+
+function renderJava() {
+  const j = state.data.javaclass;
+  let h = "<div class='grid g2'>";
+  h += "<div class='card'><h4>Class</h4>" +
+    kvRow("Class", "<span style='color:var(--accent)'>" + esc(j.className || "\u2014") + "</span>") +
+    kvRow("Superclass", esc(j.superClass || "\u2014")) +
+    kvRow("Version", esc(j.classVersion) + " <span class='dimt'>(" + esc(j.javaVersion) + ")</span>") +
+    kvRow("Access", badges(j.accessFlags)) +
+    kvRow("Constant pool", (j.constantPoolCount || 0).toLocaleString() + " entries (" + j.utf8ConstantCount + " UTF-8)") +
+    kvRow("Interfaces", j.interfaceCount) +
+    kvRow("Fields", j.fieldCount) +
+    kvRow("Methods", j.methodCount) +
+    "</div>";
+  h += "<div class='card'><h4>Methods</h4>";
+  if (j.methods && j.methods.length) {
+    h += "<table class='tbl'><tr><th>Name</th><th>Descriptor</th><th>Flags</th></tr>";
+    for (const m of j.methods) h += "<tr><td>" + esc(m.name || "&lt;clinit&gt;") + "</td><td class='dim'>" + esc(m.descriptor) + "</td><td>" + esc(m.flags.trim()) + "</td></tr>";
+    h += "</table>";
+  } else h += "<div class='empty'>No methods.</div>";
+  h += "</div></div>";
+  page("javaclass").innerHTML = h;
+}
+
+let stringsObs = null;
+function ensureStringsPage() {
+  const p = page("strings");
+  if (!p.dataset.built) {
+    p.dataset.built = "1";
+    p.innerHTML = "<div class='toolbar'>" +
+      "<input type='text' id='strFilter' placeholder='Filter (substring)\u2026'>" +
+      "<select id='strKind'><option value='0'>All strings</option><option value='1'>ASCII only</option><option value='2'>UTF-16 only</option></select>" +
+      "<select id='strMin'><option value='4'>Min length 4</option><option value='6'>Min length 6</option><option value='8'>Min length 8</option><option value='12'>Min length 12</option><option value='16'>Min length 16</option></select>" +
+      "<span class='spacer'></span><span class='meta' id='strMeta'></span></div>" +
+      "<div class='tblwrap' style='max-height:calc(100vh - 210px)'><div id='stringsList'></div><div id='stringsSentinel' style='height:40px'></div></div>";
+    $("#strFilter").oninput = debounce(() => resetStrings(), 250);
+    $("#strKind").onchange = () => resetStrings();
+    $("#strMin").onchange = () => resetStrings();
+    stringsObs = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) loadStrings();
+    }, { root: $("#content") });
+    stringsObs.observe($("#stringsSentinel"));
+    resetStrings();
+  }
+}
+
+function debounce(fn, ms) {
+  let t = 0;
+  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+function resetStrings() {
+  state.strings.items = [];
+  state.strings.total = 0;
+  state.strings.exhausted = false;
+  $("#stringsList").innerHTML = "";
+  loadStrings();
+}
+
+async function loadStrings() {
+  const s = state.strings;
+  if (s.loading || s.exhausted || !state.data) return;
+  s.loading = true;
+  $("#strMeta").textContent = "loading\u2026";
+  try {
+    const r = await send("strings", {
+      offset: s.items.length, count: 500,
+      minLen: s.minLen, kind: s.kind, filter: s.filter
+    });
+    s.total = r.total;
+    const q = s.filter.toLowerCase();
+    const list = $("#stringsList");
+    const frag = document.createDocumentFragment();
+    for (const it of r.items) {
+      let txt = esc(it.text);
+      if (q) {
+        const idx = it.text.toLowerCase().indexOf(q);
+        if (idx >= 0) {
+          const raw = it.text;
+          txt = esc(raw.slice(0, idx)) + "<b>" + esc(raw.substr(idx, q.length)) + "</b>" + esc(raw.slice(idx + q.length));
+        }
+      }
+      const row = document.createElement("div");
+      row.className = "strow";
+      row.innerHTML = "<span class='so'>" + hx(it.off) + "</span><span class='sw'>" + (it.wide ? "W" : "A") + "</span><span class='st'>" + txt + "</span>";
+      row.onclick = () => jumpHex(it.off);
+      frag.appendChild(row);
+    }
+    list.appendChild(frag);
+    s.items = s.items.concat(r.items);
+    if (r.items.length < 500) s.exhausted = true;
+    $("#strMeta").textContent = s.items.length.toLocaleString() + " shown · " + s.total.toLocaleString() + " total" + (state.data.stringsInfo.truncated ? " (scan capped)" : "");
+  } catch (e) {
+    $("#strMeta").textContent = "error: " + e.message;
+  } finally {
+    s.loading = false;
+  }
+}
+
+let hexBusy = false;
+function ensureHexPage() {
+  const p = page("hex");
+  if (!p.dataset.built) {
+    p.dataset.built = "1";
+    p.innerHTML = "<div class='toolbar'>" +
+      "<button class='copybtn' id='hexPrev' style='padding:6px 12px'>&#9650; Prev 4K</button>" +
+      "<button class='copybtn' id='hexNext' style='padding:6px 12px'>&#9660; Next 4K</button>" +
+      "<input type='text' id='hexGoto' placeholder='Go to offset (hex or dec)\u2026' style='width:220px'>" +
+      "<span class='spacer'></span><span class='meta' id='hexMeta'></span></div>" +
+      "<div class='hexwrap' id='hexBody'></div>";
+    $("#hexGoto").onkeydown = ev => {
+      if (ev.key === "Enter") {
+        let v = ev.target.value.trim();
+        let n = v.startsWith("0x") || v.startsWith("0X") || /[a-f]/i.test(v) ? parseInt(v.replace(/^0x/i, ""), 16) : parseInt(v, 10);
+        if (!isNaN(n)) hexGoto(n);
+      }
+    };
+    $("#hexPrev").onclick = () => hexGoto(state.hex.base - 4096);
+    $("#hexNext").onclick = () => hexGoto(state.hex.base + 4096);
+    hexGoto(0);
+  }
+}
+
+async function hexGoto(off) {
+  const d = state.data;
+  if (!d) return;
+  if (off < 0) off = 0;
+  if (off >= d.file.size) off = Math.max(0, d.file.size - 16);
+  off = off & ~0xF;
+  if (hexBusy) return;
+  hexBusy = true;
+  try {
+    const r = await send("hex", { offset: off, length: 4096 });
+    const bytes = r.bytes;
+    let h = "";
+    for (let i = 0; i < bytes.length; i += 16) {
+      let hexPart = "", ascPart = "";
+      for (let j = 0; j < 16; j++) {
+        if (i + j < bytes.length) {
+          const b = bytes[i + j];
+          hexPart += b.toString(16).padStart(2, "0") + " ";
+          ascPart += (b >= 0x20 && b < 0x7F) ? "<span class='pr'>" + String.fromCharCode(b).replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</span>" : "<span class='dp'>\u00B7</span>";
+        } else { hexPart += "   "; ascPart += " "; }
+        if (j === 7) hexPart += " ";
+      }
+      h += "<div class='hexrow'><span class='ho'>" + (r.offset + i).toString(16).padStart(8, "0") + "</span><span class='hb'>" + hexPart + "</span><span class='ha'>" + ascPart + "</span></div>";
+    }
+    $("#hexBody").innerHTML = h;
+    state.hex.base = r.offset;
+    $("#hexMeta").textContent = "offset " + hx(r.offset) + " \u2013 " + hx(r.offset + bytes.length) + " of " + hx(d.file.size) + " (" + d.file.sizeHuman + ")";
+    $("#hexBody").scrollTop = 0;
+  } catch (e) {
+    $("#hexMeta").textContent = "error: " + e.message;
+  } finally {
+    hexBusy = false;
+  }
+}
+
+document.addEventListener("click", ev => {
+  const c = ev.target.closest("[data-copy]");
+  if (c && navigator.clipboard) {
+    navigator.clipboard.writeText(c.dataset.copy).then(() => {
+      c.textContent = "copied";
+      setTimeout(() => c.textContent = "copy", 1200);
+    });
+  }
+});
+
+document.addEventListener("keydown", ev => {
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "o") {
+    ev.preventDefault();
+    openDialog();
+  }
+});
+$("#openBtn").onclick = openDialog;
+
+window.addEventListener("resize", debounce(drawEntropy, 150));
+</script>
+</body>
+</html>
