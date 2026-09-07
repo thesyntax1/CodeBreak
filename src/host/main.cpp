@@ -469,8 +469,8 @@ public:
         HRESULT hr = env->CreateCoreWebView2Controller(g_hwnd, new ControllerCreatedHandler(html));
         if (FAILED(hr)) {
             wchar_t err[96];
-            swprintf(err, 96, L\"WebView2 controller creation failed (0x%08X)\", (unsigned int)hr);
-            MessageBoxW(g_hwnd, err, L\"CodeBreak\", MB_ICONERROR);
+            swprintf(err, 96, L"WebView2 controller creation failed (0x%08X)", (unsigned int)hr);
+            MessageBoxW(g_hwnd, err, L"CodeBreak", MB_ICONERROR);
             if (g_env) { g_env->Release(); g_env = nullptr; }
             PostQuitMessage(1);
             return S_OK;
