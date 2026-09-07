@@ -5,6 +5,7 @@
 #include "pe.h"
 #include "zipfmt.h"
 #include "dex.h"
+#include "risk.h"
 #include <cstring>
 
 namespace cb {
@@ -29,6 +30,8 @@ FormatId detectFormat(const uint8_t* d, size_t n, const std::string& lowerName) 
     }
     if (n >= 8 && memcmp(d, "\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", 8) == 0) return FMT_OLE;
     if (n >= 8 && memcmp(d, "\x00" "asm", 4) == 0) return FMT_WASM;
+    if (n >= 4 && d[0] == 0x1F && d[1] == 0x8B) return FMT_GZIP;
+    if (n >= 262 && memcmp(d + 257, "ustar", 5) == 0) return FMT_TAR;
     if (n >= 5 && memcmp(d, "%PDF", 4) == 0) return FMT_PDF;
     if (n >= 2 && d[0] == '#' && d[1] == '!') return FMT_SCRIPT;
     if (n >= 8 && memcmp(d, "\x89PNG\r\n\x1a\n", 8) == 0) return FMT_IMAGE;
@@ -52,6 +55,8 @@ const char* formatLabel(FormatId f) {
     case FMT_WASM: return "WebAssembly";
     case FMT_PDF: return "PDF document";
     case FMT_IMAGE: return "Image file";
+    case FMT_GZIP: return "GZIP compressed file";
+    case FMT_TAR: return "TAR archive";
     default: return "Unknown / raw binary";
     }
 }
@@ -182,6 +187,24 @@ AnalysisOutput analyzeFile(const uint8_t* d, size_t n, const std::string& pathUt
         label = "Java class file";
         break;
     }
+    case FMT_GZIP: {
+        b.key("gzip");
+        gzipParse(d, n, b, inds);
+        label = "GZIP compressed file";
+        break;
+    }
+    case FMT_TAR: {
+        b.key("tar");
+        tarParse(d, n, b, inds);
+        label = "TAR archive";
+        break;
+    }
+    case FMT_PDF: {
+        b.key("pdf");
+        pdfParse(d, n, b, inds);
+        label = "PDF document";
+        break;
+    }
     case FMT_OLE:
         b.obj("ole");
         b.kv("sectorShift", (uint64_t)((uint32_t)d[0x1E] | ((uint32_t)d[0x1F] << 8)));
@@ -224,6 +247,11 @@ AnalysisOutput analyzeFile(const uint8_t* d, size_t n, const std::string& pathUt
         b.endObj();
     }
     b.endArr();
+
+    RiskResult risk = assessRisk(d, n, lowerName, fmt, inds.items);
+    b.obj("risk");
+    writeRiskJson(b, risk);
+    b.endObj();
 
     b.endObj();
     out.json = std::move(j);

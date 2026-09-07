@@ -723,6 +723,52 @@ def build_elf():
     print("wrote", path, len(data), "bytes")
 
 
+def build_gzip():
+    import struct, zlib
+    payload = b"codebreak gzip fixture payload with a filename and comment.\n" * 4
+    co = zlib.compressobj(9, zlib.DEFLATED, -15)
+    body = co.compress(payload) + co.flush()
+    fname = b"fixture_payload.bin"
+    hdr = b"\x1f\x8b\x08\x08" + struct.pack("<I", 1650000000) + b"\x00\xff" + fname + b"\x00"
+    tail = struct.pack("<II", zlib.crc32(payload) & 0xFFFFFFFF, len(payload))
+    data = hdr + body + tail
+    path = os.path.join(OUT, "fixture_data.gz")
+    open(path, "wb").write(data)
+    print("wrote", path, len(data), "bytes")
+
+
+def build_tar():
+    import tarfile, io
+    data = b"tar member text payload for codebreak.\n"
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as t:
+        ti = tarfile.TarInfo("src/lib.c")
+        ti.size = len(data)
+        t.addfile(ti, io.BytesIO(data))
+        ti2 = tarfile.TarInfo("scripts/run.sh")
+        sh = b"#!/bin/sh\necho codebreak\n"
+        ti2.size = len(sh)
+        t.addfile(ti2, io.BytesIO(sh))
+    path = os.path.join(OUT, "fixture_bundle.tar")
+    open(path, "wb").write(buf.getvalue())
+    print("wrote", path, buf.tell(), "bytes")
+
+
+def build_pdf():
+    header = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n"
+    objs = [
+        b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+        b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\n",
+        b"4 0 obj\n<< /Length 33 >>\nstream\nBT /F1 12 Tf (codebreak pdf) Tj ET\nendstream\nendobj\n",
+    ]
+    trailer = b"trailer\n<< /Size 5 /Root 1 0 R >>\n%%EOF\n"
+    data = header + b"".join(objs) + trailer
+    path = os.path.join(OUT, "fixture_doc.pdf")
+    open(path, "wb").write(data)
+    print("wrote", path, len(data), "bytes")
+
+
 if __name__ == "__main__":
     import sys
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
@@ -736,3 +782,9 @@ if __name__ == "__main__":
         build_java_class()
     if which in ("all", "elf"):
         build_elf()
+    if which in ("all", "gzip"):
+        build_gzip()
+    if which in ("all", "tar"):
+        build_tar()
+    if which in ("all", "pdf"):
+        build_pdf()

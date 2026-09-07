@@ -67,6 +67,13 @@ body {
 }
 #openBtn:hover { filter: brightness(1.12); }
 #openBtn:active { filter: brightness(.92); }
+#exportBtn {
+  height: 34px; padding: 0 14px; border: 1px solid var(--border2); border-radius: 7px;
+  background: var(--panel); color: var(--text); font-size: 12px; font-weight: 600;
+  cursor: pointer; display: flex; align-items: center; gap: 7px; flex-shrink: 0;
+}
+#exportBtn:hover { border-color: var(--accent); color: var(--accent); }
+#exportBtn:disabled { opacity: .4; cursor: default; }
 #fileChip {
   flex: 1; min-width: 0; display: none; align-items: center; gap: 10px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 7px;
@@ -237,6 +244,13 @@ code.block { display: block; background: #0d1220; border: 1px solid var(--border
 .permrow { display: flex; align-items: center; gap: 8px; padding: 5px 10px; background: var(--panel2); border: 1px solid var(--border); border-radius: 7px; margin-bottom: 5px; font-family: var(--mono); font-size: 11.5px; }
 .permrow .sev { font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 3px; }
 .permrow .sev.danger { background: rgba(255,107,107,.15); color: var(--bad); }
+.riskgauge { display: flex; align-items: center; gap: 18px; }
+.riskgauge .ring { position: relative; width: 96px; height: 96px; flex-shrink: 0; }
+.riskgauge .ring svg { transform: rotate(-90deg); }
+.riskgauge .ring .val { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 22px; font-weight: 700; }
+.riskcat { display: flex; justify-content: space-between; padding: 5px 0; font-size: 12px; }
+.riskcat .cat { text-transform: capitalize; color: var(--dim); }
+.riskcat .w { font-family: var(--mono); color: var(--text); }
 .permrow .sev.normal { background: rgba(108,182,255,.12); color: var(--info); }
 
 .dexcard { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
@@ -266,6 +280,7 @@ a { color: var(--accent); }
     </div>
   </div>
   <button id="openBtn">&#128193; Open File</button>
+  <button id="exportBtn" title="Save a self-contained HTML report" style="display:none">&#128196; Report</button>
   <div id="fileChip">
     <span id="fmtBadge"></span>
     <span class="fname" id="chipName"></span>
@@ -382,6 +397,7 @@ async function analyzeFile(path) {
     $("#sbPath").textContent = data.file.path;
     $("#sbHash").textContent = "SHA-256 " + data.hashes.sha256.slice(0, 24) + "\u2026";
     $("#welcome").style.display = "none";
+    $("#exportBtn").style.display = "inline-flex";
   } catch (e) {
     toast("Analysis failed: " + e.message);
   } finally {
@@ -390,13 +406,13 @@ async function analyzeFile(path) {
 }
 
 const TAB_ICONS = {
-  overview: "\u25CE", headers: "\u2261", sections: "\u2630", imports: "\u21C4", exports: "\u21C0",
+  overview: "\u25CE", risk: "\u26A1", headers: "\u2261", sections: "\u2630", imports: "\u21C4", exports: "\u21C0",
   resources: "\u2699", strings: "\u201C", hex: "#", manifest: "\u263C", dex: "\u2622",
   entries: "\u25A3", elfseg: "\u2192", elfsec: "\u2630", macho: "\u2318", javaclass: "\u2615",
 };
 
 function buildTabs(d) {
-  const tabs = [{ id: "overview", label: "Overview" }];
+  const tabs = [{ id: "overview", label: "Overview" }, { id: "risk", label: "Risk" }];
   if (d.pe) {
     tabs.push({ id: "headers", label: "Headers" });
     tabs.push({ id: "sections", label: "Sections", cnt: d.pe.sections.length });
@@ -442,6 +458,7 @@ function selectTab(id) {
 
 function renderAll() {
   renderOverview();
+  renderRisk();
   if (state.data.pe) { renderHeaders(); renderSections(); renderImports(); renderExports(); renderResources(); }
   if (state.data.apk) { renderManifest(); renderDex(); }
   if (state.data.zip) renderEntries();
@@ -465,6 +482,26 @@ function entropyColor(e) {
 }
 function ebar(e) {
   return "<div class='ebar' title='entropy " + e.toFixed(3) + "'><div class='fill' style='width:" + (e / 8 * 100).toFixed(1) + "%;background:" + entropyColor(e) + "'></div></div>";
+}
+function riskColor(lv) {
+  switch (lv) {
+    case "critical": return "#ff2d55";
+    case "high": return "#ff6b6b";
+    case "medium": return "#f5c451";
+    case "low": return "#6cb6ff";
+    default: return "#3fd68f";
+  }
+}
+function riskGauge(score, level) {
+  const c = riskColor(level);
+  const r = 40, C = 2 * Math.PI * r;
+  const off = C * (1 - score / 100);
+  return "<div class='riskgauge'><div class='ring'><svg width='96' height='96'>" +
+    "<circle cx='48' cy='48' r='" + r + "' fill='none' stroke='#1c2436' stroke-width='8'/>" +
+    "<circle cx='48' cy='48' r='" + r + "' fill='none' stroke='" + c + "' stroke-width='8' stroke-linecap='round' stroke-dasharray='" + C + "' stroke-dashoffset='" + off + "'/></svg>" +
+    "<div class='val' style='color:" + c + "'>" + score + "</div></div>" +
+    "<div><div style='font-size:15px;font-weight:700;color:" + c + ";text-transform:uppercase'>" + esc(level) + "</div>" +
+    "<div class='dimt' style='font-size:11px'>weighted heuristic risk score</div></div></div>";
 }
 
 function jumpHex(off) {
@@ -501,6 +538,15 @@ function renderOverview() {
   h += "</div>";
   h += "</div>";
 
+  if (d.risk) {
+    const rc = riskColor(d.risk.level);
+    h += "<h3 class='sec'>Risk Assessment</h3><div class='card' style='margin-bottom:4px'><div style='display:flex;align-items:center;gap:16px;flex-wrap:wrap'>" +
+      "<span class='badge' style='font-size:12px;padding:6px 12px;background:" + rc + "22;color:" + rc + ";border:1px solid " + rc + "55'>" + esc(d.risk.level.toUpperCase()) + " &#183; " + d.risk.score + "/100</span>" +
+      "<span class='dimt' style='font-size:11px'>" + esc(d.risk.summary || "") + "</span>" +
+      "<span style='margin-left:auto'><button class='copybtn' data-navtab='risk' style='padding:6px 12px'>Open full risk report &#8594;</button></span>" +
+      "</div></div>";
+  }
+
   h += "<h3 class='sec'>Entropy</h3><div class='card'>";
   h += "<div style='display:flex;gap:26px;align-items:center;margin-bottom:10px'>";
   h += "<div><div style='font-size:26px;font-family:var(--mono);font-weight:600;color:" + entropyColor(d.entropy.overall) + "'>" + d.entropy.overall.toFixed(3) + "</div><div class='dimt' style='font-size:10px;text-transform:uppercase;letter-spacing:.6px'>overall (0\u20138 bits/byte)</div></div>";
@@ -535,6 +581,33 @@ function renderOverview() {
   }
   p.innerHTML = h;
   drawEntropy();
+}
+
+function renderRisk() {
+  const d = state.data;
+  const r = d.risk;
+  const p = page("risk");
+  if (!r) { p.innerHTML = "<div class='empty'>No risk assessment available.</div>"; return; }
+  const c = riskColor(r.level);
+  let h = "";
+  h += "<div class='card' style='margin-bottom:14px'><h4>Heuristic Risk Score</h4>" + riskGauge(r.score, r.level) +
+    "<div style='margin-top:12px;color:var(--dim);font-size:12px'>" + esc(r.summary || "") + "</div></div>";
+  h += "<div class='grid g2'><div class='card'><h4>Contributing Signals (" + (r.signals || []).length + ")</h4>";
+  if (!r.signals || !r.signals.length) h += "<div class='empty'>No weighted signals fired.</div>";
+  else {
+    const maxW = Math.max.apply(null, r.signals.map(s => s.weight));
+    h += r.signals.map(s => {
+      const pct = (s.weight / maxW * 100).toFixed(1);
+      return "<div class='ind s0' style='margin-bottom:8px'><div class='dot' style='background:" + c + ";box-shadow:0 0 8px " + c + "'></div><div style='flex:1'><div class='t'>" + esc(s.category) + " <span class='badge b-gray'>+" + s.weight + " pts</span>" + (s.hits > 1 ? " <span class='badge b-blue'>x" + s.hits + "</span>" : "") + "</div>" +
+        "<div class='d'>" + esc(s.title) + "</div>" +
+        "<div style='margin-top:6px'><div class='ebar' style='width:100%'><div class='fill' style='width:" + pct + "%;background:" + c + "'></div></div></div></div></div>";
+    }).join("");
+  }
+  h += "</div><div class='card'><h4>Top Findings</h4>";
+  if (!r.topFindings || !r.topFindings.length) h += "<div class='empty'>No high-confidence findings.</div>";
+  else h += r.topFindings.map(f => "<div class='ind s1'><div class='dot'></div><div class='d' style='color:var(--text)'>" + esc(f) + "</div></div>").join("");
+  h += "</div></div>";
+  p.innerHTML = h;
 }
 
 function drawEntropy() {
@@ -1099,6 +1172,8 @@ async function hexGoto(off) {
 }
 
 document.addEventListener("click", ev => {
+  const t = ev.target.closest("[data-navtab]");
+  if (t) { selectTab(t.dataset.navtab); return; }
   const c = ev.target.closest("[data-copy]");
   if (c && navigator.clipboard) {
     navigator.clipboard.writeText(c.dataset.copy).then(() => {
@@ -1115,6 +1190,14 @@ document.addEventListener("keydown", ev => {
   }
 });
 $("#openBtn").onclick = openDialog;
+$("#exportBtn").onclick = async () => {
+  $("#exportBtn").disabled = true;
+  try {
+    const r = await send("export");
+    if (r.exported) toast("Report saved to " + r.path, true);
+  } catch (e) { toast("Export failed: " + e.message); }
+  finally { $("#exportBtn").disabled = false; }
+};
 
 window.addEventListener("resize", debounce(drawEntropy, 150));
 </script>

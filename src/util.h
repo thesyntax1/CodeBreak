@@ -94,4 +94,13 @@ FileInfo queryFileInfo(const std::string& pathUtf8);
 
 bool readFileBytes(const std::string& pathUtf8, std::vector<uint8_t>& out, std::string& errOut);
 
+struct WalkOptions {
+    bool includeHiddenDirs = false;
+    size_t maxFiles = 200000;
+};
+
+bool walkDirectory(const std::string& dirUtf8, std::vector<std::string>& out,
+                   std::string& errOut, const WalkOptions& opt = WalkOptions());
+
 }
+

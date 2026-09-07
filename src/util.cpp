@@ -6,6 +6,7 @@
 #include <ctime>
 #include <cctype>
 #include <algorithm>
+#include <filesystem>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -500,6 +501,38 @@ bool readFileBytes(const std::string& pathUtf8, std::vector<uint8_t>& out, std::
     bool bad = ferror(f) != 0;
     fclose(f);
     if (bad) { errOut = "read error"; return false; }
+    return true;
+}
+
+bool walkDirectory(const std::string& dirUtf8, std::vector<std::string>& out,
+                   std::string& errOut, const WalkOptions& opt) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (!fs::exists(dirUtf8, ec) || ec) { errOut = "directory not found"; return false; }
+    out.clear();
+    std::vector<fs::path> stack;
+    stack.push_back(fs::path(dirUtf8));
+    while (!stack.empty() && out.size() < opt.maxFiles) {
+        fs::path cur = stack.back();
+        stack.pop_back();
+        fs::directory_iterator it(cur, fs::directory_options::skip_permission_denied, ec);
+        fs::directory_iterator end;
+        if (ec) { ec.clear(); continue; }
+        for (; it != end && out.size() < opt.maxFiles; it.increment(ec)) {
+            if (ec) { ec.clear(); break; }
+            const fs::directory_entry& de = *it;
+            std::error_code ec2;
+            if (de.is_directory(ec2)) {
+                if (ec2) continue;
+                std::string name = de.path().filename().string();
+                if (opt.includeHiddenDirs || name.empty() || name[0] != '.') {
+                    stack.push_back(de.path());
+                }
+            } else if (de.is_regular_file(ec2)) {
+                out.push_back(de.path().string());
+            }
+        }
+    }
     return true;
 }
 

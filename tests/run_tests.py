@@ -118,6 +118,37 @@ def main():
     hx = json.loads(r.stdout)
     check("hex dump", hx["bytes"][:2] == [0x4D, 0x5A])
 
+    gz = analyze(os.path.join(FIX, "fixture_data.gz"))
+    check("gzip format", gz["format"]["label"] == "GZIP compressed file")
+    check("gzip filename", gz["gzip"]["filename"] == "fixture_payload.bin")
+    check("gzip crc", gz["gzip"]["crc32"] is not None)
+    check("gzip has risk", isinstance(gz["risk"], dict))
+
+    ta = analyze(os.path.join(FIX, "fixture_bundle.tar"))
+    check("tar format", ta["format"]["label"] == "TAR archive")
+    names = {e["name"] for e in ta["tar"]["entries"]}
+    check("tar entries", "src/lib.c" in names and "scripts/run.sh" in names)
+
+    pd = analyze(os.path.join(FIX, "fixture_doc.pdf"))
+    check("pdf format", pd["format"]["label"] == "PDF document")
+    check("pdf version", pd["pdf"]["version"].startswith("1.7"))
+    check("pdf objects", pd["pdf"]["objectCount"] >= 3 and pd["pdf"]["streamCount"] >= 1)
+
+    check("apk risk present", isinstance(apk["risk"], dict) and "score" in apk["risk"])
+    check("apk risk level", apk["risk"]["level"] in ("clean", "low", "medium", "high", "critical"))
+    sevlev = {i["title"] for i in apk["indicators"]}
+    check("risk incorporates findings", apk["risk"]["score"] >= 10 if "Application is debuggable" in sevlev else True)
+
+    r = subprocess.run([CLI, os.path.join(FIX, "fixture_pe.exe"), "--risk"], capture_output=True)
+    risk = json.loads(r.stdout)
+    check("risk-only mode", "risk" in risk and "score" in risk["risk"])
+
+    batchdir = FIX
+    r = subprocess.run([CLI, "--batch", batchdir], capture_output=True)
+    bd = json.loads(r.stdout)
+    check("batch runs", bd["meta"]["fileCount"] == len(os.listdir(FIX)) and len(bd["items"]) >= 5)
+    check("batch item risk", all("riskScore" in i and "riskLevel" in i for i in bd["items"]))
+
     print(f"{passed} passed, {failed} failed")
     return 1 if failed else 0
 

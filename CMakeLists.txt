@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(CodeBreak VERSION 1.0.0 LANGUAGES CXX)
+project(CodeBreak VERSION 2.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,8 +16,11 @@ set(CB_CORE_SOURCES
     src/dex.cpp
     src/elf.cpp
     src/otherfmts.cpp
+    src/miscfmt.cpp
+    src/report.cpp
     src/util.cpp
     src/hashes.cpp
+    src/risk.cpp
     src/jsonr.cpp
 )
 

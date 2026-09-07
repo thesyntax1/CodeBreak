@@ -31,6 +31,7 @@
 #include "../util.h"
 #include "../hashes.h"
 #include "../pe.h"
+#include "../report.h"
 
 #ifdef __MINGW32__
 __CRT_UUID_DECL(ICoreWebView2WebMessageReceivedEventHandler, 0x57213f19, 0x00e6, 0x49fa, 0x8e, 0x07, 0x89, 0x8e, 0xa0, 0x1e, 0xcb, 0xd2)
@@ -77,6 +78,7 @@ struct FileCtx {
     std::string path;
     std::vector<uint8_t> bytes;
     StringsIndex si;
+    std::string fullAnalysis;
 };
 static FileCtx g_ctx;
 static std::mutex g_ctxMutex;
@@ -162,17 +164,18 @@ static void runAnalysis(uint64_t id, const std::string& pathUtf8) {
     auto t1 = std::chrono::steady_clock::now();
     double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
+    std::string j = ao.json;
+    char msb[48];
+    snprintf(msb, sizeof(msb), "%.1f", ms);
+    j.insert(j.size() - 1, ", \"analysisMs\": " + std::string(msb));
+
     {
         std::lock_guard<std::mutex> lk(g_ctxMutex);
         g_ctx.path = pathUtf8;
         g_ctx.bytes = std::move(data);
         g_ctx.si.build(g_ctx.bytes.data(), g_ctx.bytes.size(), 4, 2000000);
+        g_ctx.fullAnalysis = j;
     }
-
-    std::string j = ao.json;
-    char msb[48];
-    snprintf(msb, sizeof(msb), "%.1f", ms);
-    j.insert(j.size() - 1, ", \"analysisMs\": " + std::string(msb));
 
     std::string full;
     Builder b(full);
@@ -227,6 +230,59 @@ static void serveHex(uint64_t id, uint64_t off, uint64_t len) {
     postToUi(id, full);
 }
 
+static bool writeUtf8File(const wchar_t* pathW, const std::string& content) {
+    HANDLE h = CreateFileW(pathW, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    DWORD written = 0;
+    WriteFile(h, content.data(), (DWORD)content.size(), &written, nullptr);
+    CloseHandle(h);
+    return written == (DWORD)content.size();
+}
+
+static void cmdExportReport(uint64_t id) {
+    std::string analysis, path;
+    {
+        std::lock_guard<std::mutex> lk(g_ctxMutex);
+        if (g_ctx.fullAnalysis.empty()) { respondError(id, "no analysis to export"); return; }
+        analysis = g_ctx.fullAnalysis;
+        path = g_ctx.path;
+    }
+    wchar_t fileBuf[4096];
+    fileBuf[0] = 0;
+    OPENFILENAMEW ofn;
+    memset(&ofn, 0, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = g_hwnd;
+    ofn.lpstrFilter = L"HTML report\\0*.html;*.htm\\0All files\\0*.*\\0\\0";
+    ofn.lpstrDefExt = L"html";
+    ofn.lpstrFile = fileBuf;
+    ofn.nMaxFile = 4096;
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER | OFN_HIDEREADONLY;
+    bool cancelled = false;
+    if (GetSaveFileNameW(&ofn)) {
+        std::string html = buildHtmlReport(analysis, path);
+        if (!writeUtf8File(fileBuf, html)) {
+            std::string full;
+            Builder b(full);
+            b.beginObj(); b.kv("id", id); b.kv("ok", false);
+            b.kv("error", "failed to write report file"); b.endObj();
+            postToUi(id, full);
+            return;
+        }
+    } else {
+        cancelled = true;
+    }
+    std::string full;
+    Builder b(full);
+    b.beginObj(); b.kv("id", id); b.kv("ok", true);
+    b.obj("data");
+    b.kv("exported", !cancelled);
+    b.kv("path", cancelled ? std::string() : wideToUtf8(fileBuf));
+    b.endObj();
+    b.endObj();
+    postToUi(id, full);
+}
+
 static void cmdOpenDialog(uint64_t id) {
     wchar_t fileBuf[4096];
     fileBuf[0] = 0;
@@ -271,6 +327,8 @@ static void handleMessage(const JVal& m) {
     std::string cmd = cmdV ? cmdV->str : "";
     if (cmd == "open") {
         cmdOpenDialog(id);
+    } else if (cmd == "export") {
+        cmdExportReport(id);
     } else if (cmd == "analyze") {
         std::string path = m.getStr("path");
         if (path.empty()) { respondError(id, "no path"); return; }
