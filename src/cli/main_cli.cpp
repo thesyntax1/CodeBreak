@@ -52,11 +52,14 @@ static bool stdoutIsTty() { return isatty(fileno(stdout)) != 0; }
 static void initColor() {
     g_color = stdoutIsTty();
 #ifdef _WIN32
-    if (g_color) {
-        HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
-        DWORD m = 0;
-        if (GetConsoleMode(h, &m)) SetConsoleMode(h, m | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
-    }
+    // Make the Windows console decode our UTF-8 bytes correctly (accented Latin,
+    // Cyrillic, CJK, ...). Without this the console uses CP437/CP1252 and turns
+    // "Türkçe" into mojibake like "T├╝rk├ğe". Harmless when stdout is redirected.
+    SetConsoleOutputCP(65001); // CP_UTF8
+    SetConsoleCP(65001);       // CP_UTF8 (interactive shell input)
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD m = 0;
+    if (g_color && GetConsoleMode(h, &m)) SetConsoleMode(h, m | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
 #endif
 }
 
@@ -154,6 +157,15 @@ static const Msg kMsgs[] = {
     { "PERSISTENCE", "持久化", "АВТОЗАПУСК", "PERSISTENCIA", "PERSISTENZ", "永続化", "지속성", "PERSISTANCE", "KALICILIK" },
     { "strings", "字符串", "строки", "cadenas", "Zeichenketten", "文字列", "문자열", "chaînes", "Dizeler" },
     { "Language set", "语言已设置", "язык установлен", "idioma establecido", "Sprache festgelegt", "言語を設定しました", "언어 설정 완료", "langue définie", "Dil ayarlandı" },
+    { "bytes", "字节", "байт", "bytes", "Bytes", "バイト", "바이트", "octets", "bayt" },
+    { "clean", "干净", "чистый", "limpio", "sauber", "クリーン", "깨끗함", "propre", "Temiz" },
+    { "low", "低", "низкий", "bajo", "niedrig", "低", "낮음", "faible", "Düşük" },
+    { "medium", "中", "средний", "medio", "mittel", "中", "중간", "moyen", "Orta" },
+    { "high", "高", "высокий", "alto", "hoch", "高", "높음", "élevé", "Yüksek" },
+    { "critical", "严重", "критический", "crítico", "kritisch", "重大", "심각", "critique", "Kritik" },
+    { "info", "信息", "информ.", "info", "Info", "情報", "정보", "info", "Bilgi" },
+    { "more", "更多", "ещё", "más", "mehr", "他", "더", "plus", "daha" },
+    { "files", "个文件", "файлов", "archivos", "Dateien", "ファイル", "파일", "fichiers", "dosya" },
 };
 static size_t kMsgCount = sizeof(kMsgs) / sizeof(kMsgs[0]);
 
@@ -352,7 +364,7 @@ static void renderHuman(const JVal& doc, const std::string& path, double ms) {
     s += padTo("  " + tr("Path"), 12) + " " + WHT() + path + R() + "\n";
     if (file) {
         double sz = file->getNum("size");
-        std::string szs = file->getStr("sizeHuman") + "  (" + std::to_string((long long)sz) + " bytes)";
+        std::string szs = file->getStr("sizeHuman") + "  (" + std::to_string((long long)sz) + " " + tr("bytes") + ")";
         s += padTo("  " + tr("Size"), 12) + " " + szs + "\n";
         if (!file->getStr("modified").empty()) s += padTo("  " + tr("Modified"), 12) + " " + file->getStr("modified") + "\n";
         if (!file->getStr("created").empty()) s += padTo("  " + tr("Created"), 12) + " " + file->getStr("created") + "\n";
@@ -376,7 +388,7 @@ static void renderHuman(const JVal& doc, const std::string& path, double ms) {
         long long score = (long long)risk->getNum("score", 0);
         s += "\n";
         s += CYN() + "========== " + tr("Risk") + " ==========" + R() + "\n";
-        s += "  " + B() + riskColor(lvl) + tr("Risk") + " " + lvl + " " + std::to_string(score) + "/100" + R() + "\n";
+        s += "  " + B() + riskColor(lvl) + tr("Risk") + " " + tr(lvl) + " " + std::to_string(score) + "/100" + R() + "\n";
         std::string summary = risk->getStr("summary");
         if (!summary.empty()) s += "  " + DIM() + summary + R() + "\n";
         const JVal* tf = risk->get("topFindings");
@@ -391,7 +403,7 @@ static void renderHuman(const JVal& doc, const std::string& path, double ms) {
         s += CYN() + "========== " + tr("Indicators") + " ==========" + R() + "\n";
         for (const JVal& i : inds->arr) {
             int sev = i.getInt("severityNum", i.getInt("severity", 0));
-            s += "  " + B() + "[" + sevColor(sev) + i.getStr("severity") + R() + B() + "]" + R() + " " +
+            s += "  " + B() + "[" + sevColor(sev) + tr(i.getStr("severity")) + R() + B() + "]" + R() + " " +
                  WHT() + i.getStr("title") + R() + "\n";
             std::string det = i.getStr("detail");
             if (!det.empty()) s += "      " + DIM() + det + R() + "\n";
@@ -431,8 +443,8 @@ static void renderStringsHuman(const std::string& path, const std::string& pat,
             s += "  " + DIM() + o2 + R() + " " + WHT() + it.getStr("text") + R() + "\n";
         }
     }
-    if (total > count) s += DIM() + "  ... " + std::to_string((long long)(total - count)) + " more (use --count)" + R() + "\n";
-    else if (total == 0) s += "  none found\n";
+    if (total > count) s += DIM() + "  ... " + std::to_string((long long)(total - count)) + " " + tr("more") + " (--count)" + R() + "\n";
+    else if (total == 0) s += "  " + tr("none found") + "\n";
     o(s);
 }
 
@@ -659,8 +671,8 @@ static std::string asmHumanText(const std::vector<AsmLine>& lines, uint64_t base
     std::string t = section.empty() ? std::string("code") : section;
     s += CYN() + "========== " + t + " - " + tr("x86-64 disassembly") + " ==========" + R() + "\n";
     char sb[64];
-    snprintf(sb, sizeof(sb), "%s @ 0x%llx  (%llu bytes)", section.empty() ? "code" : section.c_str(),
-             (unsigned long long)base, (unsigned long long)length);
+    snprintf(sb, sizeof(sb), "%s @ 0x%llx  (%llu %s)", section.empty() ? "code" : section.c_str(),
+             (unsigned long long)base, (unsigned long long)length, tr("bytes").c_str());
     s += DIM() + "  " + sb + R() + "\n\n";
     size_t n = 0;
     for (const AsmLine& L : lines) {
@@ -1288,11 +1300,11 @@ static int cmdBatch(const std::vector<std::string>& args) {
                     it.format.empty() ? "-" : it.format.c_str(),
                     std::to_string(it.size).c_str(),
                     riskColor(it.riskLevel).c_str(), it.riskScore, R().c_str(),
-                    it.riskLevel.empty() ? "-" : it.riskLevel.c_str(),
+                    it.riskLevel.empty() ? "-" : tr(it.riskLevel).c_str(),
                     it.sha256.substr(0, 12).c_str());
         }
         char d[48];
-        snprintf(d, sizeof(d), "%zu files  |  %.2f ms", items.size(), ms);
+        snprintf(d, sizeof(d), "%zu %s  |  %.2f ms", items.size(), tr("files").c_str(), ms);
         fprintf(stdout, "\n%s%s%s\n", DIM().c_str(), d, R().c_str());
         return 0;
     }
@@ -1358,9 +1370,9 @@ static int cmdCompare(const std::vector<std::string>& args) {
         s += "  sha256Equal     " + std::string(sa == sb ? "true" : "false") + "\n\n";
         s += "  " + padTo(tr("File"), 40) + " " + padTo(tr("Format"), 30) + " " + padTo(tr("Risk"), 9) + " SHA-256\n";
         s += "  " + padTo(fileBase(args[0]), 40) + " " + padTo(la, 30) + " " +
-             B() + riskColor(rla) + padTo(rla + " " + std::to_string(rsa), 9) + R() + " " + sa.substr(0, 16) + "\n";
+             B() + riskColor(rla) + padTo(tr(rla) + " " + std::to_string(rsa), 9) + R() + " " + sa.substr(0, 16) + "\n";
         s += "  " + padTo(fileBase(args[1]), 40) + " " + padTo(lb, 30) + " " +
-             B() + riskColor(rlb) + padTo(rlb + " " + std::to_string(rsb), 9) + R() + " " + sb.substr(0, 16) + "\n";
+             B() + riskColor(rlb) + padTo(tr(rlb) + " " + std::to_string(rsb), 9) + R() + " " + sb.substr(0, 16) + "\n";
         o(s);
         return 0;
     }

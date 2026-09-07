@@ -75,6 +75,14 @@ Language codes: `en` (default), `tr` (Türkçe), `zh` (简体中文), `ru`, `es`
 languages and `lang <code>` (or `language <code>`) to switch on the fly — e.g.
 `lang tr`.
 
+On **Windows** the console is switched to UTF-8 automatically at startup, so
+accented letters and Cyrillic/CJK text render correctly (no mojibake). On both
+platforms make sure your terminal uses a UTF-8 font/locale for best results.
+Localized UI chrome includes section headings, field labels, risk level and
+severity words, and messages; the actual *parsed data* (format labels, indicator
+titles/details, imported API names, disassembly mnemonics, file paths) stays in
+its original form because that is the analyzed content, not interface text.
+
 Exit code 0 on success, 1 on error (message on stderr). `--report` and the batch `--html` flag write self-contained HTML reports.
 
 ### Interactive shell
