@@ -1,6 +1,7 @@
 #include "pe.h"
 #include "jsonw.h"
 #include "util.h"
+#include "x509.h"
 #include <cstring>
 #include <cmath>
 
@@ -848,11 +849,15 @@ PeSummary peParse(const uint8_t* d, size_t n, Builder& b) {
             if (certOff + certSize > n) c.note("certificate table extends past end of file");
             b.arr("certificates");
             Rd cr(d, n, (size_t)certOff);
+            Pkcs7Result sign;
+            const uint8_t* signBlob = nullptr;
+            uint32_t signLen = 0;
             for (int i = 0; i < 32 && cr.ok(); i++) {
                 uint16_t len = cr.u16();
                 uint16_t revision = cr.u16();
                 uint16_t certType = cr.u16();
                 if (len < 8) break;
+                if (!signBlob && (size_t)len - 8 <= n - cr.o) { signBlob = d + cr.o; signLen = len - 8; }
                 b.beginObj();
                 b.kv("length", (uint64_t)len);
                 b.kvHex("revision", revision, 4);
@@ -864,6 +869,19 @@ PeSummary peParse(const uint8_t* d, size_t n, Builder& b) {
                 if (!cr.skip((size_t)len - 8)) break;
             }
             b.endArr();
+            if (signBlob && signLen >= 64 && parsePkcs7(signBlob, signLen, sign) && !sign.signers.empty()) {
+                b.obj("signer");
+                const X509Signer& s = sign.signers[0];
+                b.kv("subject", s.subject);
+                b.kv("issuer", s.issuer);
+                b.kv("serial", s.serial);
+                if (!s.notBefore.empty()) b.kv("notBefore", s.notBefore);
+                if (!s.notAfter.empty()) b.kv("notAfter", s.notAfter);
+                b.kv("certCount", (uint64_t)sign.certCount);
+                b.kv("thumbprintSha1", s.thumbprintSha1);
+                b.endObj();
+                c.sum.inds.push_back({ 0, "Authenticode signer", s.subject });
+            }
         }
     }
     b.endObj();

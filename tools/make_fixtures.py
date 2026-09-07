@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import struct, hashlib, os, sys, random, zlib
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 def raw_deflate(data):
     co = zlib.compressobj(9, zlib.DEFLATED, -15)
     return co.compress(data) + co.flush()
@@ -769,6 +771,47 @@ def build_pdf():
     print("wrote", path, len(data), "bytes")
 
 
+def build_ole():
+    from cfbwriter import stream, storage, serialize
+    word = stream("WordDocument", b"\x00" * 256 + b"codebreak-legacy-word-document" * 20)
+    compobj = stream("\x01CompObj", b"\xfe\xff\x00\x00" + b"\x0a\x00" + b"MSWordDoc" + b"\x00" * 48)
+    docsumm = stream("\x05DocumentSummaryInformation", b"\x00" * 4096)
+    summ = stream("\x05SummaryInformation", b"\x00" * 4096)
+    vba = storage("VBA", [
+        stream("ThisDocument", b"\x43\x43" * 60),
+        stream("_VBA_PROJECT", b"ID={00000000-0000-0000-0000-000000000000}\nDocument=ThisDocument\n"),
+        stream("dir", b"base64-encoded-vba-source-here\n"),
+        stream("__SRP_0", b"project-storage"),
+        stream("__SRP_3", b"project-storage"),
+        stream("PROJECT", b"Project=ThisDocument\nClass=ThisDocument\n"),
+    ])
+    macros = storage("Macros", [vba])
+    path = os.path.join(OUT, "fixture_macro.doc")
+    serialize([word, compobj, docsumm, summ, macros], path)
+    print("wrote", path, os.path.getsize(path), "bytes")
+
+
+def build_pkcs7():
+    import subprocess, tempfile
+    with tempfile.TemporaryDirectory() as td:
+        cfg = os.path.join(td, "cfg.cnf")
+        open(cfg, "w").write(
+            "[req]\ndistinguished_name=dn\nprompt=no\n"
+            "[dn]\nC=TR\nO=CodeBreak Test Labs\nOU=Signing\nCN=CodeBreak Fixture Signer\n"
+            "emailAddress=dev@codebreak.local\n")
+        key = os.path.join(td, "k.pem")
+        cert = os.path.join(td, "cert.pem")
+        payload = os.path.join(td, "payload.bin")
+        open(payload, "wb").write(b"codebreak signed payload\n" * 2)
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                        "-days", "30", "-keyout", key, "-out", cert,
+                        "-config", cfg], check=True, capture_output=True)
+        out = os.path.join(OUT, "fixture_signature.p7")
+        subprocess.run(["openssl", "cms", "-sign", "-in", payload, "-signer", cert,
+                        "-inkey", key, "-outform", "DER", "-out", out], check=True, capture_output=True)
+        print("wrote", out, os.path.getsize(out), "bytes")
+
+
 if __name__ == "__main__":
     import sys
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
@@ -788,3 +831,7 @@ if __name__ == "__main__":
         build_tar()
     if which in ("all", "pdf"):
         build_pdf()
+    if which in ("all", "ole"):
+        build_ole()
+    if which in ("all", "pkcs7"):
+        build_pkcs7()

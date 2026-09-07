@@ -160,7 +160,7 @@ RiskResult assessRisk(const uint8_t* d, size_t n, const std::string& lowerName,
 
     for (const Indicator& i : inds) {
         if (i.severity <= 0) continue;
-        int w = i.severity == 3 ? 24 : i.severity == 2 ? 15 : 8;
+        int w = i.severity == 3 ? 30 : i.severity == 2 ? 20 : 10;
         addPlain("findings", i.title, w, 1);
         if (i.severity >= 2 && out.topFindings.size() < 6) out.topFindings.push_back(i.title);
     }

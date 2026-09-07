@@ -239,6 +239,76 @@ static int runBatch(const std::string& dir, const std::string& jsonPath,
 int main(int argc, char** argv) {
     if (argc < 2) { printUsage(); return 2; }
     std::string first = argv[1];
+    if (first == "--compare" || first == "-c") {
+        if (argc < 4) { printUsage(); return 2; }
+        bool indent = false;
+        std::string a = argv[2], bpath = argv[3];
+        for (int i = 4; i < argc; i++) if (std::string(argv[i]) == "--indent") indent = true;
+        auto analyze1 = [&](const std::string& p, JVal& doc, double& ms) -> bool {
+            std::vector<uint8_t> d; std::string e;
+            if (!readFileBytes(p, d, e)) { fprintf(stderr, "error %s: %s\n", p.c_str(), e.c_str()); return false; }
+            FileInfo fi = queryFileInfo(p);
+            auto t0 = std::chrono::steady_clock::now();
+            AnalysisOutput ao = analyzeFile(d.data(), d.size(), p, fi);
+            auto t1 = std::chrono::steady_clock::now();
+            ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+            return jsonParse(ao.json, doc);
+        };
+        JVal da, db;
+        double ma = 0, mb = 0;
+        if (!analyze1(a, da, ma) || !analyze1(bpath, db, mb)) return 1;
+        const JVal* ha = da.get("hashes");
+        const JVal* hb = db.get("hashes");
+        const JVal* fa = da.get("format");
+        const JVal* fb = db.get("format");
+        const JVal* ra = da.get("risk");
+        const JVal* rb = db.get("risk");
+        const JVal* fa2 = da.get("file");
+        const JVal* fb2 = db.get("file");
+        std::string sa = ha ? ha->getStr("sha256") : "";
+        std::string sb = hb ? hb->getStr("sha256") : "";
+        std::string out;
+        Builder bw(out);
+        bw.beginObj();
+        bw.kv("identical", sa == sb && sa.size() == 64);
+        bw.kv("sha256Equal", sa == sb);
+        auto putSide = [&](const char* key, const JVal& d2, const JVal* fmt, const JVal* risk,
+                           const JVal* f, const JVal* hashes) {
+            bw.obj(key);
+            bw.kv("path", f ? f->getStr("path") : std::string());
+            bw.kv("size", f ? (uint64_t)f->getNum("size", 0) : (uint64_t)0);
+            bw.kv("sizeHuman", f ? f->getStr("sizeHuman") : std::string());
+            bw.kv("format", fmt ? fmt->getStr("label") : std::string());
+            bw.kv("sha256", hashes ? hashes->getStr("sha256") : std::string());
+            bw.kv("md5", hashes ? hashes->getStr("md5") : std::string());
+            if (risk) {
+                bw.kv("riskScore", (int64_t)risk->getInt("score"));
+                bw.kv("riskLevel", risk->getStr("level"));
+            }
+            const JVal* inds = d2.get("indicators");
+            bw.kv("indicatorCount", inds ? (int64_t)inds->arr.size() : (int64_t)0);
+            bw.endObj();
+        };
+        putSide("a", da, fa, ra, fa2, ha);
+        putSide("b", db, fb, rb, fb2, hb);
+        bw.kv("analysisMsA", ma);
+        bw.kv("analysisMsB", mb);
+        bw.endObj();
+        printf("%s\n", indent ? prettyJson(out).c_str() : out.c_str());
+        return 0;
+    }
+
+    if (first == "--hash") {
+        if (argc < 3) { printUsage(); return 2; }
+        std::vector<uint8_t> d; std::string e;
+        if (!readFileBytes(argv[2], d, e)) { fprintf(stderr, "error: %s\n", e.c_str()); return 1; }
+        FileInfo fi = queryFileInfo(argv[2]);
+        AnalysisOutput ao = analyzeFile(d.data(), d.size(), argv[2], fi);
+        std::string j = ao.json;
+        printf("%s\n", j.c_str());
+        return 0;
+    }
+
     if (first == "--batch" || first == "-b") {
         if (argc < 3) { printUsage(); return 2; }
         std::string dir = argv[2];

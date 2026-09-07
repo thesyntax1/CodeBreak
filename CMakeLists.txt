@@ -17,6 +17,8 @@ set(CB_CORE_SOURCES
     src/elf.cpp
     src/otherfmts.cpp
     src/miscfmt.cpp
+    src/olefmt.cpp
+    src/x509.cpp
     src/report.cpp
     src/util.cpp
     src/hashes.cpp

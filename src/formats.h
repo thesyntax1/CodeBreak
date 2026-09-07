@@ -25,6 +25,7 @@ enum FormatId {
     FMT_IMAGE,
     FMT_GZIP,
     FMT_TAR,
+    FMT_PKCS7,
 };
 
 FormatId detectFormat(const uint8_t* d, size_t n, const std::string& lowerName);
@@ -37,6 +38,8 @@ void javaClassParse(const uint8_t* d, size_t n, Builder& b, IndCollector& inds);
 void gzipParse(const uint8_t* d, size_t n, Builder& b, IndCollector& inds);
 void tarParse(const uint8_t* d, size_t n, Builder& b, IndCollector& inds);
 void pdfParse(const uint8_t* d, size_t n, Builder& b, IndCollector& inds);
+void oleParse(const uint8_t* d, size_t n, Builder& b, IndCollector& inds);
+void clrParseMetadata(const uint8_t* d, size_t n, const char* key, Builder& b);
 
 struct AnalysisOutput {
     std::string json;

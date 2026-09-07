@@ -10,7 +10,7 @@ Run `CodeBreak.exe`, drop a file anywhere on the window (or press `Ctrl+O`) and 
 
 - **Overview** — file identity, format detection with confidence, SHA-256/SHA-1/MD5/CRC32, overall and per-16-KB entropy graph, a live security-indicator list, and a one-glance risk score.
 - **Risk** — the heuristic threat score rendered as a gauge (0–100, clean → critical), the weighted signal groups that produced it, and the highest-confidence findings.
-- **PE / APK / ZIP / ELF / Mach-O / Java class / GZIP / TAR / PDF tabs** — appear only when the format is present: imports and exports, rich header history, debug PDB paths, version info, TLS, Authenticode state; Android manifest (decoded from binary AXML), permissions, activities, services, DEX class map, signing schemes, native libraries; full archive trees, APK v2/v3 signature blocks; ELF sections/segments/interpreter/dynamic imports; Mach-O load commands; constant pool, fields and methods for `.class` files; gzip member metadata, POSIX tar member tables, PDF version/objects/streams/encryption/JavaScript presence.
+- **PE / APK / ZIP / ELF / Mach-O / Java class / GZIP / TAR / PDF / OLE2 / Signature tabs** — appear only when the format is present: imports and exports, rich header history, debug PDB paths, version info, TLS, Authenticode state; Android manifest (decoded from binary AXML), permissions, activities, services, DEX class map, signing schemes, native libraries; full archive trees, APK v2/v3 signature blocks; ELF sections/segments/interpreter/dynamic imports; Mach-O load commands; constant pool, fields and methods for `.class` files; gzip member metadata, POSIX tar member tables, PDF version/objects/streams/encryption/JavaScript presence; the OLE2 compound-file storage/stream tree with the container kind (Word/Excel/PowerPoint/Visio etc.); the PKCS #7 signer view listing each signing certificate's subject, issuer, serial, validity and SHA-1 thumbprint.
 - **Report** — a **Report** button in the toolbar exports a fully self-contained HTML report (no internet needed) capturing the summary, risk assessment, findings, hashes and the entire analysis tree.
 - **Strings** — virtualized list over up to 2 million extracted strings, ASCII + UTF-16 wide detection, live filter box, minimum-length control, jump-to-offset.
 - **Hex** — responsive hex viewer with offset jumping synced from the strings tab.
@@ -29,7 +29,7 @@ Every analysis ends with a `risk` node computed by `src/risk.cpp`. The engine is
 
 Signal groups include: **findings** (the parser-generated indicators, weighted by severity), **obfuscation / packing** (global and entry-region entropy, UPX/Themida/VMProtect & other protector markers), **execution** (VirtualAllocEx/WriteProcessMemory/CreateRemoteThread/process-hollowing primitives), **network** (download/HTTP-client APIs), **shell & persistence** (PowerShell `-enc`, cmd, mshta, certutil, reg add, schtasks), **encoding** (Base64 / crypto primitives), and **authenticity** (unsigned PE with no Authenticode). High-entropy content and protector strings are only scored as packing when they co-occur or sit at the code entry; the weights are tuned so benign, legitimately-compiled programs stay at clean/low.
 
-The CLI mirrors this for automation: `--risk` prints the assessment alone, `--report` writes an HTML report, and `--batch` scans whole directory trees into JSON/CSV/HTML with per-file risk.
+The CLI mirrors this for automation: `--risk` prints the assessment alone, `--report` writes an HTML report, `--compare` diffs two files' analyses, and `--batch` scans whole directory trees into JSON/CSV/HTML with per-file risk.
 
 ## CLI usage
 
@@ -40,6 +40,8 @@ codebreak-cli <file> --report out.html     # self-contained HTML report
 codebreak-cli <file> --strings --filter kernel32 --min-length 6
 codebreak-cli <file> --strings --kind wide
 codebreak-cli <file> --hex --offset 0x400 --length 512
+codebreak-cli --hash <file>                # full analysis JSON for one file
+codebreak-cli --compare A B                # side-by-side structural + hash comparison
 codebreak-cli --batch DIR                  # scan a tree -> JSON on stdout
 codebreak-cli --batch DIR --json scan.json --csv scan.csv --html report.html
 codebreak-cli --batch DIR --limit 5000 --max-mb 64
@@ -61,6 +63,8 @@ Exit code 0 on success, 1 on error (message on stderr). All output is UTF-8 JSON
 | Java class | `CAFEBABE` | version, constant pool, fields, methods with descriptors |
 | PDF | `%PDF` | version, object/stream/page counts, encryption (`/Encrypt`), embedded JavaScript, object-stream compression |
 | DEX | `dex\n` | header, checksum + SHA-1 validation, string/type/proto/field/class/method counts |
+| OLE2 (.doc/.xls/.ppt/.msi) | CFB magic `D0 CF 11 E0` | compound-file kind, FAT/DIFAT layout, directory-entry tree (storages/streams with paths, sizes, red/black-tree order), macro/VBA project presence |
+| PKCS #7 / CMS | SignedData OID | signer certificates (subject, issuer, serial, validity, signature algorithm, SHA-1 thumbprint), signer count, content type |
 | Anything else | — | hashes, entropy profile, strings, hex |
 
 Entropy is computed over 16 KB blocks with Shannon's formula; the overall figure is the weighted mean. Strings extraction recognizes ASCII (CP437-safe printable run) and UTF-16LE/BE.
@@ -98,8 +102,10 @@ MinGW-w64 (UCRT x64) also works: `cmake -S . -B build-mingw -G "MinGW Makefiles"
 src/
   analyze.cpp      format detection + orchestration, one JSON document out
   pe.cpp elf.cpp zipfmt.cpp dex.cpp axml.cpp otherfmts.cpp miscfmt.cpp
+  olefmt.cpp x509.cpp
                    format parsers (PE/COFF, ELF, ZIP/APK/JAR, DEX, binary AXML,
-                   Mach-O, Java class, GZIP, TAR, PDF)
+                   Mach-O, Java class, GZIP, TAR, PDF, OLE2 compound files,
+                   X.509/PKCS #7 signatures)
   risk.cpp         heuristic threat-scoring engine (0-100 + weighted signals)
   report.cpp       self-contained HTML report and batch-report generators
   hashes.cpp       SHA-256, SHA-1, MD5, CRC32, entropy
@@ -110,10 +116,11 @@ src/
   host/main.cpp    Win32 + WebView2 application host
   host/app.html    the entire UI (single file, no external assets)
 tests/
-  run_tests.py     67-assertion suite; checks real parser output
+  run_tests.py     assertion suite; checks real parser output
 third_party/webview2  official WebView2 SDK headers + loader (1.0.2651.64)
 tools/make_fixtures.py  builds PE, APK, DEX, ELF, Mach-O, class, ZIP, GZIP,
-                        TAR and PDF fixtures from scratch
+                        TAR, PDF, OLE2 (.doc) and PKCS #7 fixtures from scratch
+tools/cfbwriter.py      minimal OLE2 compound-file writer used by make_fixtures.py
 tools/make_icon.py       regenerates the application icon
 ```
 
@@ -128,7 +135,7 @@ python3 tools/make_fixtures.py     # builds every fixture from scratch
 CB_CLI=build-cli/codebreak-cli python3 tests/run_tests.py
 ```
 
-The suite builds a real PE image (sections, imports, exports, rich header, debug directory, TLS, version info, certificate table), a real signed APK (ZIP + binary AXML manifest + DEX with valid SHA-1/Adler-32 + v1/v2 signature blocks), an ELF shared object, a Mach-O image, a Java class, plus GZIP, TAR and PDF fixtures — then asserts dozens of parsed fields against known ground truth (including that the new parsers and the risk engine are present in the output) and checksum-validating runs against system binaries.
+The suite builds a real PE image (sections, imports, exports, rich header, debug directory, TLS, version info, certificate table), a real signed APK (ZIP + binary AXML manifest + DEX with valid SHA-1/Adler-32 + v1/v2 signature blocks), an ELF shared object, a Mach-O image, a Java class, a macro-bearing OLE2 `.doc` and an OpenSSL PKCS #7 signature, plus GZIP, TAR and PDF fixtures — then asserts dozens of parsed fields against known ground truth (including that the new parsers and the risk engine are present in the output) and checksum-validating runs against system binaries.
 
 ## License
 

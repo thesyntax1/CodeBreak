@@ -11,3 +11,5 @@ dist/
 !third_party/webview2/**/*.lib
 
 release/
+__pycache__/
+*.pyc

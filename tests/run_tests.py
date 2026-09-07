@@ -134,6 +134,29 @@ def main():
     check("pdf version", pd["pdf"]["version"].startswith("1.7"))
     check("pdf objects", pd["pdf"]["objectCount"] >= 3 and pd["pdf"]["streamCount"] >= 1)
 
+    ol = analyze(os.path.join(FIX, "fixture_macro.doc"))
+    check("ole format", ol["format"]["label"] == "Compound File (OLE2)")
+    ole = ol["ole"]
+    check("ole kind word", ole["kind"].startswith("Microsoft Word"))
+    names = [e["name"] for e in ole["entries"]]
+    check("ole vba tree", "VBA" in names and "_VBA_PROJECT" in names and "ThisDocument" in names)
+    check("ole macro indicator", any("VBA macro" in i["title"] for i in ol["indicators"]))
+    check("ole has risk", "risk" in ol)
+
+    ps = analyze(os.path.join(FIX, "fixture_signature.p7"))
+    check("pkcs7 format", ps["format"]["label"].startswith("PKCS #7"))
+    sg = ps["pkcs7"]["signers"][0]
+    check("pkcs7 signer", "CodeBreak" in sg["subject"] and "CodeBreak" in sg["issuer"])
+    check("pkcs7 thumbprint", len(sg["thumbprintSha1"]) == 40)
+
+    r = subprocess.run([CLI, "--compare", os.path.join(FIX, "fixture_pe.exe"), os.path.join(FIX, "fixture_pe.exe")], capture_output=True)
+    cmp2 = json.loads(r.stdout)
+    check("compare identical", cmp2["identical"] is True and cmp2["sha256Equal"] is True)
+
+    r = subprocess.run([CLI, "--hash", os.path.join(FIX, "fixture_pe.exe")], capture_output=True)
+    hsh = json.loads(r.stdout)
+    check("hash mode", hsh["hashes"]["sha256"] == pe["hashes"]["sha256"])
+
     check("apk risk present", isinstance(apk["risk"], dict) and "score" in apk["risk"])
     check("apk risk level", apk["risk"]["level"] in ("clean", "low", "medium", "high", "critical"))
     sevlev = {i["title"] for i in apk["indicators"]}

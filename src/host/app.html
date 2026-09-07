@@ -409,6 +409,7 @@ const TAB_ICONS = {
   overview: "\u25CE", risk: "\u26A1", headers: "\u2261", sections: "\u2630", imports: "\u21C4", exports: "\u21C0",
   resources: "\u2699", strings: "\u201C", hex: "#", manifest: "\u263C", dex: "\u2622",
   entries: "\u25A3", elfseg: "\u2192", elfsec: "\u2630", macho: "\u2318", javaclass: "\u2615",
+  ole: "\u{1F4C4}", pkcs7: "\u{1F511}",
 };
 
 function buildTabs(d) {
@@ -431,6 +432,8 @@ function buildTabs(d) {
   }
   if (d.macho) tabs.push({ id: "macho", label: "Load Commands", cnt: d.macho.loadCommands.length });
   if (d.javaclass) tabs.push({ id: "javaclass", label: "Class Info" });
+  if (d.ole) tabs.push({ id: "ole", label: "OLE2 Tree", cnt: d.ole.directoryEntryCount });
+  if (d.pkcs7) tabs.push({ id: "pkcs7", label: "Signature", cnt: d.pkcs7.certCount });
   tabs.push({ id: "strings", label: "Strings", cnt: d.stringsInfo.total });
   tabs.push({ id: "hex", label: "Hex View" });
   const sb = $("#sidebar");
@@ -465,6 +468,8 @@ function renderAll() {
   if (state.data.elf) { renderElfSeg(); renderElfSec(); }
   if (state.data.macho) renderMacho();
   if (state.data.javaclass) renderJava();
+  if (state.data.ole) renderOle();
+  if (state.data.pkcs7) renderPkcs7();
 }
 
 function page(id) { return $("#page-" + id); }
@@ -1035,6 +1040,45 @@ function renderJava() {
   } else h += "<div class='empty'>No methods.</div>";
   h += "</div></div>";
   page("javaclass").innerHTML = h;
+}
+
+function renderOle() {
+  const o = state.data.ole;
+  const p = page("ole");
+  let h = "";
+  h += "<div class='card' style='margin-bottom:14px'><h4>Compound File (OLE2)</h4><div class='grid g3'>" +
+    kvRow("Kind", "<span class='badge b-purple'>" + esc(o.kind || "") + "</span>") +
+    kvRow("Sector size", o.sectorSize + " B") +
+    kvRow("Entries", o.directoryEntryCount) +
+    kvRow("Storages", o.storageCount) +
+    kvRow("Streams", o.streamCount) +
+    kvRow("Major version", o.majorVersion) + "</div></div>";
+  h += "<div class='tblwrap'><table class='tbl'><tr><th>Path</th><th>Type</th><th>Size</th></tr>";
+  for (const e of o.entries) {
+    h += "<tr><td style='white-space:normal'>" + "&nbsp;".repeat(e.depth * 2) + esc(e.name) +
+      (e.type === "storage" ? "/" : "") + "</td><td class='dim'>" + esc(e.type) + "</td>" +
+      "<td class='dim'>" + (e.size !== undefined ? fmtBytes(e.size) : "\\u2014") + "</td></tr>";
+  }
+  h += "</table></div>";
+  p.innerHTML = h;
+}
+
+function renderPkcs7() {
+  const s = state.data.pkcs7;
+  const p = page("pkcs7");
+  let h = "";
+  if (!s || s.certCount === 0) { p.innerHTML = "<div class='empty'>No signing certificates were extracted.</div>"; return; }
+  for (const sg of s.signers) {
+    h += "<div class='card' style='margin-bottom:14px'><h4>" + (sg.subject ? esc(sg.subject) : "Signing certificate") + "</h4>" +
+      kvRow("Subject", esc(sg.subject)) +
+      kvRow("Issuer", esc(sg.issuer)) +
+      kvRow("Serial", "<span class='dimt'>" + esc(sg.serial) + "</span>") +
+      kvRow("Valid from", esc(sg.notBefore || "\\u2014")) +
+      kvRow("Valid to", esc(sg.notAfter || "\\u2014")) +
+      kvRow("SHA-1 thumbprint", "<span class='dimt'>" + esc(sg.thumbprintSha1) + "</span>") + "</div>";
+  }
+  h += "<div class='card'><h4>Container</h4>" + kvRow("Content type", esc(s.contentType)) + kvRow("Certificates", s.certCount) + "</div>";
+  p.innerHTML = h;
 }
 
 let stringsObs = null;

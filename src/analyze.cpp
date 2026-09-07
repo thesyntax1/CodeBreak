@@ -6,9 +6,20 @@
 #include "zipfmt.h"
 #include "dex.h"
 #include "risk.h"
+#include "x509.h"
 #include <cstring>
 
 namespace cb {
+
+bool looksLikePkcs7(const uint8_t* d, size_t n) {
+    if (n < 40 || d[0] != 0x30) return false;
+    static const uint8_t signedOid[] = { 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02 };
+    size_t lim = n < 96 ? n : 96;
+    for (size_t i = 1; i + sizeof(signedOid) < lim; i++) {
+        if (d[i] == 0x2a && memcmp(d + i, signedOid, sizeof(signedOid)) == 0) return true;
+    }
+    return false;
+}
 
 FormatId detectFormat(const uint8_t* d, size_t n, const std::string& lowerName) {
     if (looksLikePe(d, n)) return FMT_PE;
@@ -37,6 +48,7 @@ FormatId detectFormat(const uint8_t* d, size_t n, const std::string& lowerName) 
     if (n >= 8 && memcmp(d, "\x89PNG\r\n\x1a\n", 8) == 0) return FMT_IMAGE;
     if (n >= 3 && d[0] == 0xFF && d[1] == 0xD8 && d[2] == 0xFF) return FMT_IMAGE;
     if (n >= 6 && (memcmp(d, "GIF87a", 6) == 0 || memcmp(d, "GIF89a", 6) == 0)) return FMT_IMAGE;
+    if (looksLikePkcs7(d, n)) return FMT_PKCS7;
     return FMT_UNKNOWN;
 }
 
@@ -57,6 +69,7 @@ const char* formatLabel(FormatId f) {
     case FMT_IMAGE: return "Image file";
     case FMT_GZIP: return "GZIP compressed file";
     case FMT_TAR: return "TAR archive";
+    case FMT_PKCS7: return "PKCS #7 / CMS signature or message";
     default: return "Unknown / raw binary";
     }
 }
@@ -205,13 +218,23 @@ AnalysisOutput analyzeFile(const uint8_t* d, size_t n, const std::string& pathUt
         label = "PDF document";
         break;
     }
-    case FMT_OLE:
-        b.obj("ole");
-        b.kv("sectorShift", (uint64_t)((uint32_t)d[0x1E] | ((uint32_t)d[0x1F] << 8)));
-        b.kv("miniSectorShift", (uint64_t)((uint32_t)d[0x20] | ((uint32_t)d[0x21] << 8)));
-        inds.add(0, "Compound File container", "Used by MSI installers and legacy Office documents");
-        b.endObj();
+    case FMT_PKCS7: {
+        b.key("pkcs7");
+        Pkcs7Result pr;
+        parsePkcs7(d, n, pr);
+        writePkcs7Json(b, pr);
+        label = "PKCS #7 / CMS signature or message";
+        if (pr.signers.size()) {
+            inds.add(0, "Digitally signed container", "Signer: " + pr.signers[0].subject);
+        }
         break;
+    }
+    case FMT_OLE: {
+        b.key("ole");
+        oleParse(d, n, b, inds);
+        label = "Compound File (OLE2)";
+        break;
+    }
     case FMT_SCRIPT: {
         b.obj("script");
         size_t e = 0;
