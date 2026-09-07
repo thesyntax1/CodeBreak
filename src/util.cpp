@@ -454,7 +454,7 @@ uint64_t fileTimeNowUnix() {
 }
 
 #ifdef _WIN32
-static std::wstring utf8ToWide(const std::string& s) {
+std::wstring utf8ToWide(const std::string& s) {
     if (s.empty()) return std::wstring();
     int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
     std::wstring w((size_t)n, 0);

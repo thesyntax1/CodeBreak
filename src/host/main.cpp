@@ -88,14 +88,6 @@ struct PendingResult {
     std::string json;
 };
 
-static std::wstring utf8ToWide(const std::string& s) {
-    if (s.empty()) return std::wstring();
-    int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
-    std::wstring w((size_t)n, 0);
-    if (n) MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), &w[0], n);
-    return w;
-}
-
 static std::string wideToUtf8(const wchar_t* w) {
     if (!w || !*w) return std::string();
     int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
