@@ -191,6 +191,21 @@ def main():
     risk = json.loads(r.stdout)
     check("risk-only mode", "risk" in risk and "score" in risk["risk"])
 
+    r = subprocess.run([CLI, os.path.join(FIX, "fixture_pe.exe"), "--behavior"], capture_output=True)
+    beh = json.loads(r.stdout)
+    check("behavior sections", set(beh.keys()) == {"network", "fileSystem", "process", "persistence"})
+    check("behavior file path", any("fixture.pdb" in p for p in beh["fileSystem"]["paths"]))
+    check("behavior file apis", "CreateFileW" in beh["fileSystem"]["apis"] and "ReadFile" in beh["fileSystem"]["apis"])
+
+    r = subprocess.run([CLI, os.path.join(FIX, "fixture_elf64"), "--asm"], capture_output=True)
+    asm = json.loads(r.stdout)["code"]
+    texts = [ln["text"] for ln in asm["lines"]]
+    check("asm section", asm["section"] == ".text")
+    check("asm first insn", texts[0] == "xor ebp, ebp")
+    check("asm call target", any(t == "call 0x1139" for t in texts))
+    check("asm ret present", any(t == "ret" for t in texts))
+    check("asm aligned base", asm["base"] == "0x1050")
+
     batchdir = FIX
     r = subprocess.run([CLI, "--batch", batchdir], capture_output=True)
     bd = json.loads(r.stdout)

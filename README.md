@@ -31,6 +31,9 @@ codebreak-cli <file> --view                 # force the human summary
 codebreak-cli <file> --json                 # force raw JSON
 codebreak-cli <file> --pretty               # force indented JSON
 codebreak-cli <file> --risk                 # only the risk assessment (JSON)
+codebreak-cli <file> --behavior             # static host-behavior trace (see below)
+codebreak-cli <file> --asm                  # x86-64 disassembly of the code section
+                        [--offset N] [--base N] [--length N]
 codebreak-cli <file> --strings [PATTERN]    # extract strings; optional filter substring
                         [--min-len N]      # minimum string length (default 4)
                         [--kind all|ascii|wide] [--count N]
@@ -49,7 +52,22 @@ Exit code 0 on success, 1 on error (message on stderr). `--report` and the batch
 
 ### Interactive shell
 
-Run `codebreak-cli` with **no arguments** to enter an interactive `codebreak>` shell where you type commands the same way you would on the command line — bare file paths, `risk <file>`, `strings <file>`, `hex <file> 0x400`, `batch <dir>`, `compare <a> <b>`, `hash <file>`, `report <file> out.html`, plus `history`, `help`, `version`, `clear` and `exit`. This is handy when you double-click the exe on Windows instead of running it from a terminal. Your typed commands are saved to a history file (`~/.codebreak_history` on Linux, `%APPDATA%\CodeBreak.history` on Windows).
+Run `codebreak-cli` with **no arguments** to enter an interactive `codebreak>` shell where you type commands the same way you would on the command line — bare file paths, `risk <file>`, `behavior <file>`, `asm <file>` (alias `code`/`disasm`), `strings <file>`, `hex <file> 0x400`, `batch <dir>`, `compare <a> <b>`, `hash <file>`, `report <file> out.html`, plus `history`, `help`, `version`, `clear` and `exit`. This is handy when you double-click the exe on Windows instead of running it from a terminal. Your typed commands are saved to a history file (`~/.codebreak_history` on Linux, `%APPDATA%\CodeBreak.history` on Windows).
+
+### Code extraction (disassembly)
+
+`codebreak-cli <file> --asm` decodes the main executable section of a native PE or ELF x86-64 binary into an objdump-style listing: address, raw bytes, mnemonic and operands. It resolves relative branches/jumps/calls to their target addresses and follows RIP-relative addressing and ModRM/SIB forms. Step into any byte window with `--offset N --base N --length N` (e.g. to walk a single function). Output is a colorized terminal table, or `{"code":{"lines":[...]}}` JSON when piped.
+
+### Host behavior trace (static)
+
+`--behavior` answers *"where does this sample reach out, and what does it touch?"* **without ever executing the file.** It cross-references the strings and the imported APIs and reports four groups:
+
+- **network** — URLs / hostnames / IPs / e-mails found in the binary plus network-capable imports (`InternetOpen`/`HttpOpenRequest`, `WinHttp`, `WSAStartup`/`socket`/`connect`, `URLDownloadToFile`, ...);
+- **fileSystem** — path strings the sample references (`C:\...`, `%APPDATA%`, `%TEMP%`, `\Users\...`) and file APIs (`CreateFileW`, `WriteFile`, `NtCreateFile`, `MoveFile`, `CopyFile`, ...);
+- **process** — command/launch strings (`powershell`, `cmd /c`, `certutil`, `rundll32`, `schtasks`, ...) and process/code-injection APIs (`CreateProcessW`, `WriteProcessMemory`, `CreateRemoteThread`, ...);
+- **persistence** — Run-key / `\Startup\` candidates and registry/service APIs.
+
+Treat the output as *candidates*, not a runtime guarantee: it is derived statically and may include benign lookalikes (e.g. a version string such as `1.2.3.4` can read like an IP).
 
 ## What is parsed
 
@@ -111,6 +129,8 @@ src/
                    Mach-O, Java class, GZIP, TAR, PDF, OLE2 compound files,
                    X.509/PKCS #7 signatures)
   risk.cpp         heuristic threat-scoring engine (0-100 + weighted signals)
+  behavior.cpp     static host-behavior extraction (network/file/process/persistence)
+  disasm.cpp       x86-64 disassembler (ModRM/SIB/REX/RIP-relative, branches/calls)
   report.cpp       self-contained HTML report and batch-report generators
   hashes.cpp       SHA-256, SHA-1, MD5, CRC32, entropy
   util.cpp         file IO, string building, wide-string decode, formatting,

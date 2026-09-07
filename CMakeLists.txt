@@ -20,6 +20,8 @@ set(CB_CORE_SOURCES
     src/util.cpp
     src/hashes.cpp
     src/risk.cpp
+    src/behavior.cpp
+    src/disasm.cpp
     src/jsonr.cpp
 )
 

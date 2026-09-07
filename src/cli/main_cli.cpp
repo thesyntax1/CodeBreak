@@ -5,12 +5,15 @@
 #include "../hashes.h"
 #include "../pe.h"
 #include "../risk.h"
+#include "../behavior.h"
+#include "../disasm.h"
 #include "../report.h"
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
 #include <string>
 #include <vector>
+#include <set>
 #include <chrono>
 
 #ifdef _WIN32
@@ -367,6 +370,248 @@ static int cmdHash(const std::string& path) {
     return cmdFull(a, false);
 }
 
+static void collectImports(const JVal& doc, std::vector<std::string>& out) {
+    const JVal* pe = doc.get("pe");
+    if (!pe) return;
+    const JVal* imports = pe->get("imports");
+    if (!imports || imports->type != JVal::ARR) return;
+    for (const JVal& mod : imports->arr) {
+        const JVal* funcs = mod.get("functions");
+        if (!funcs || funcs->type != JVal::ARR) continue;
+        for (const JVal& f : funcs->arr) {
+            std::string nm = f.getStr("name");
+            if (!nm.empty() && out.size() < 600) out.push_back(nm);
+        }
+    }
+}
+
+static std::string asciiLowerName(const std::string& p) {
+    std::string r = p;
+    for (auto& c : r) if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
+    return r;
+}
+
+static void renderBehaviorHuman(const BehaviorResult& br) {
+    std::string s;
+    s += "\n";
+    s += CYN() + "========== Host behavior (static) ==========" + R() + "\n";
+    if (br.endpoints.empty() && br.filePaths.empty() && br.commands.empty() &&
+        br.persistence.empty() && br.networkApis.empty() && br.fileApis.empty() &&
+        br.processApis.empty() && br.persistenceApis.empty()) {
+        s += "  " + DIM() + "no suspicious network, file or process signals found" + R() + "\n";
+        o(s);
+        return;
+    }
+    if (!br.endpoints.empty()) {
+        s += "\n" + B() + WHT() + "NETWORK TARGETS" + R() + "\n";
+        for (const auto& e : br.endpoints) {
+            const char* tag = e.kind == "url" ? "url   " : e.kind == "ip" ? "ip    " : e.kind == "email" ? "email " : "domain";
+            s += "  " + (e.kind == "ip" ? YEL() : GRN()) + "[" + std::string(tag) + "]" + R() + " " + WHT() + e.value + R() + "\n";
+        }
+    }
+    if (!br.filePaths.empty()) {
+        s += "\n" + B() + WHT() + "FILES / PATHS TOUCHED" + R() + "\n";
+        for (const auto& p : br.filePaths) s += "  " + CYN() + p + R() + "\n";
+    }
+    if (!br.commands.empty()) {
+        s += "\n" + B() + WHT() + "COMMANDS / LAUNCHES" + R() + "\n";
+        for (const auto& c : br.commands) s += "  " + RED() + c + R() + "\n";
+    }
+    if (!br.persistence.empty()) {
+        s += "\n" + B() + WHT() + "PERSISTENCE CANDIDATES" + R() + "\n";
+        for (const auto& p : br.persistence) s += "  " + YEL() + p + R() + "\n";
+    }
+    auto apiBlock = [&](const char* title, const std::vector<std::string>& apis) {
+        if (apis.empty()) return;
+        s += "\n" + B() + WHT() + std::string(title) + " (imported APIs)" + R() + "\n";
+        std::string line = "  ";
+        for (size_t i = 0; i < apis.size(); i++) {
+            line += DIM() + apis[i] + R();
+            if (i + 1 < apis.size()) line += ", ";
+            if (line.size() > 96) { s += line + "\n"; line = "  "; }
+        }
+        if (line != "  ") s += line + "\n";
+    };
+    apiBlock("NETWORK", br.networkApis);
+    apiBlock("FILE SYSTEM", br.fileApis);
+    apiBlock("PROCESS / CODE", br.processApis);
+    apiBlock("PERSISTENCE", br.persistenceApis);
+    o(s);
+}
+
+static int cmdBehavior(const std::string& path, bool indent) {
+    std::vector<uint8_t> d;
+    std::string err;
+    if (!readFileBytes(path, d, err)) { fprintf(stderr, "error: %s\n", err.c_str()); return 1; }
+    Analysis a = analyzePath(path);
+    std::vector<std::string> imports;
+    if (a.ok) collectImports(a.doc, imports);
+    BehaviorResult br = analyzeBehavior(d.data(), d.size(), imports, asciiLowerName(path));
+    std::string j;
+    Builder b(j);
+    b.beginObj();
+    writeBehaviorJson(b, br);
+    b.endObj();
+    bool human = !indent && stdoutIsTty();
+    if (human) { renderBehaviorHuman(br); return 0; }
+    printf("%s\n", indent ? prettyJson(j).c_str() : j.c_str());
+    return 0;
+}
+
+struct AsmLine {
+    uint64_t addr;
+    std::string bytes;
+    std::string text;
+    bool hasTarget;
+    uint64_t target;
+    bool isCall;
+    bool isJump;
+};
+
+static uint64_t jnumOf(const JVal* v) {
+    if (!v) return 0;
+    if (v->type == JVal::NUM) return (uint64_t)v->num;
+    if (v->type == JVal::STR) return strtoull(v->str.c_str(), nullptr, 0);
+    return 0;
+}
+
+static const JVal* findCodeSection(const JVal& doc, std::string& nameOut) {
+    const JVal* fmtRoot = doc.get("pe");
+    const JVal* sections = nullptr;
+    if (fmtRoot) {
+        sections = fmtRoot->get("sections");
+        std::string want = fmtRoot->getStr("entryPointSection");
+        if (!want.empty() && sections && sections->type == JVal::ARR)
+            for (const JVal& s : sections->arr)
+                if (s.getStr("name") == want) { nameOut = want; return &s; }
+    } else {
+        fmtRoot = doc.get("elf");
+        if (fmtRoot) {
+            sections = fmtRoot->get("sections");
+            if (sections && sections->type == JVal::ARR)
+                for (const JVal& s : sections->arr)
+                    if (s.getStr("name") == ".text") { nameOut = ".text"; return &s; }
+        }
+    }
+    if (sections && sections->type == JVal::ARR) {
+        for (const JVal& s : sections->arr) {
+            if (s.getInt("executable", 0)) { nameOut = s.getStr("name"); return &s; }
+        }
+        if (!sections->arr.empty()) { nameOut = sections->arr[0].getStr("name"); return &sections->arr[0]; }
+    }
+    return nullptr;
+}
+
+static std::string asmHexByte(uint8_t c) {
+    static const char* h = "0123456789abcdef";
+    std::string s;
+    s += h[c >> 4]; s += h[c & 15];
+    return s;
+}
+
+static int cmdAsm(const std::string& path, uint64_t setOff, uint64_t setBase, uint64_t setLen) {
+    std::vector<uint8_t> d;
+    std::string err;
+    if (!readFileBytes(path, d, err)) { fprintf(stderr, "error: %s\n", err.c_str()); return 1; }
+    Analysis a = analyzePath(path);
+    uint64_t fileOff = 0, base = 0, length = 0;
+    std::string section;
+    if (a.ok) {
+        const JVal* sec = findCodeSection(a.doc, section);
+        if (sec) {
+            fileOff = jnumOf(sec->get("rawOffset"));
+            if (!fileOff) fileOff = jnumOf(sec->get("offset"));
+            uint64_t rawSize = jnumOf(sec->get("rawSize"));
+            uint64_t sz = jnumOf(sec->get("size"));
+            length = rawSize ? rawSize : sz;
+            uint64_t vaddr = jnumOf(sec->get("virtualAddress"));
+            uint64_t saddr = jnumOf(sec->get("addr"));
+            base = vaddr ? vaddr : saddr;
+            if (a.doc.get("pe")) {
+                uint64_t imageBase = jnumOf(a.doc.get("pe") ? a.doc.get("pe")->get("imageBase") : nullptr);
+                if (imageBase) base = imageBase + (vaddr ? vaddr : 0);
+            }
+        }
+    }
+    if (setLen != UINT64_MAX) length = setLen;
+    if (setOff != UINT64_MAX) fileOff = setOff;
+    if (setBase != UINT64_MAX) base = setBase;
+    if (!length) length = d.size() > fileOff ? d.size() - fileOff : 0;
+    if (fileOff >= d.size()) { fprintf(stderr, "error: offset %llu out of range\n", (unsigned long long)fileOff); return 1; }
+    if (fileOff + length > d.size()) length = d.size() - fileOff;
+
+    std::vector<AsmLine> lines;
+    uint64_t pos = fileOff;
+    uint64_t end = fileOff + length;
+    while (pos < end && lines.size() < 4000) {
+        AsmInsn in;
+        size_t adv = disasmNext(d.data() + pos, (size_t)(end - pos), base + (pos - fileOff), in);
+        if (!adv) adv = 1;
+        AsmLine L;
+        L.addr = base + (pos - fileOff);
+        std::string hx;
+        for (size_t i = 0; i < adv && pos + i < end; i++) {
+            if (!hx.empty()) hx += " ";
+            hx += asmHexByte(d[pos + i]);
+        }
+        L.bytes = hx;
+        L.text = in.mnemonic + (in.operands.empty() ? std::string() : (" " + in.operands));
+        L.hasTarget = in.hasTarget;
+        L.target = in.target;
+        L.isCall = in.isCall;
+        L.isJump = in.isJump;
+        lines.push_back(L);
+        pos += adv;
+    }
+
+    std::string j;
+    Builder b(j);
+    b.beginObj();
+    b.obj("code");
+    b.kv("format", a.ok ? a.doc.get("format")->getStr("label") : "raw");
+    b.kv("section", section);
+    b.kv("fileOffset", fileOff);
+    b.kv("base", hexU(base, 0));
+    b.kv("bytes", length);
+    b.arr("lines");
+    for (const AsmLine& L : lines) {
+        b.beginObj();
+        b.kv("addr", hexU(L.addr, 0));
+        b.kv("bytes", L.bytes);
+        b.kv("text", L.text);
+        if (L.hasTarget) b.kv("target", hexU(L.target, 0));
+        if (L.isCall) b.kv("call", true);
+        if (L.isJump) b.kv("jump", true);
+        b.endObj();
+    }
+    b.endArr();
+    b.endObj();
+    b.endObj();
+
+    if (!stdoutIsTty()) { printf("%s\n", j.c_str()); return 0; }
+    std::string s;
+    s += "\n";
+    std::string secTitle = section.empty() ? std::string("code") : section;
+    s += CYN() + "========== " + secTitle + " (x86-64 disassembly) ==========" + R() + "\n";
+    char sb[64];
+    snprintf(sb, sizeof(sb), "%s @ 0x%llx  (%llu bytes)", section.empty() ? "code" : section.c_str(),
+             (unsigned long long)base, (unsigned long long)length);
+    s += DIM() + "  " + sb + R() + "\n\n";
+    for (const AsmLine& L : lines) {
+        char ad[24];
+        snprintf(ad, sizeof(ad), "0x%06llx", (unsigned long long)L.addr);
+        std::string ln = "  " + CYN() + ad + R() + "  ";
+        std::string bytes = L.bytes;
+        if (bytes.size() < 23) bytes.append(23 - bytes.size(), ' ');
+        ln += DIM() + bytes + R() + "  ";
+        ln += WHT() + L.text + R();
+        s += ln + "\n";
+    }
+    if (lines.empty()) s += DIM() + "  no decodable code bytes" + R() + "\n";
+    o(s);
+    return 0;
+}
+
 static int runSingle(const std::vector<std::string>& args) {
     std::string path = args[0];
     std::string pat;
@@ -673,6 +918,10 @@ static void printUsage() {
         "  codebreak-cli <file> --json                force raw JSON\n"
         "  codebreak-cli <file> --pretty              indented JSON\n"
         "  codebreak-cli <file> --risk                risk assessment JSON\n"
+        "  codebreak-cli <file> --behavior            static host-behavior trace (network,\n"
+        "                                             file paths, processes, persistence)\n"
+        "  codebreak-cli <file> --asm                 x86-64 disassembly of the code section\n"
+        "                [--offset N] [--base N] [--length N]\n"
         "  codebreak-cli <file> --strings [PATTERN] [--min-len N]\n"
         "                        [--kind all|ascii|wide] [--count N]\n"
         "  codebreak-cli <file> --hex OFFSET [--hex-len N]\n"
@@ -693,6 +942,8 @@ static void printHelp() {
         "  <file>               analyze (human summary)\n"
         "  json <file>          analyze (raw JSON)\n"
         "  risk <file>          risk assessment\n"
+        "  behavior <file>      static host-behavior trace\n"
+        "  asm <file>           x86-64 disassembly of code (alias code/disasm)\n"
         "  strings <file> ...   extract strings\n"
         "  hex <file> OFFSET    hex dump\n"
         "  compare <a> <b>      compare two files\n"
@@ -757,6 +1008,13 @@ static int runTokens(const std::vector<std::string>& args) {
         return cmdHash(args[1]);
     }
     if (first == "--version" || first == "version") { printf("CodeBreak v%s\n", CB_VERSION); return 0; }
+    if (first == "--behavior" || first == "-be" || first == "behavior") {
+        if (args.size() < 2) { fprintf(stderr, "usage: behavior <file>\n"); return 2; }
+        bool bIndent = false;
+        for (size_t i = 2; i < args.size(); i++)
+            if (args[i] == "--indent" || args[i] == "--pretty") bIndent = true;
+        return cmdBehavior(args[1], bIndent);
+    }
     if (first == "-h" || first == "--help" || first == "help") { printUsage(); return 0; }
     if (first == "json") {
         if (args.size() < 2) { fprintf(stderr, "usage: json <file>\n"); return 2; }
@@ -799,6 +1057,34 @@ static int runTokens(const std::vector<std::string>& args) {
     }
     if (first == "clear") { fprintf(stdout, "\x1b[2J\x1b[H"); return 0; }
     if (first == "exit" || first == "quit" || first == "q") return -100;
+    bool isAsmVerb = first == "asm" || first == "code" || first == "disasm" ||
+                     first == "--asm" || first == "--code" || first == "--disasm";
+    if (isAsmVerb) {
+        if (args.size() < 2) { fprintf(stderr, "usage: %s <file> [--offset N] [--base N] [--length N]\n", first.c_str()); return 2; }
+        uint64_t off = UINT64_MAX, ba = UINT64_MAX, len = UINT64_MAX;
+        for (size_t i = 2; i < args.size(); i++) {
+            if (args[i] == "--offset" && i + 1 < args.size()) off = strtoull(args[++i].c_str(), nullptr, 0);
+            else if (args[i] == "--base" && i + 1 < args.size()) ba = strtoull(args[++i].c_str(), nullptr, 0);
+            else if (args[i] == "--length" && i + 1 < args.size()) len = strtoull(args[++i].c_str(), nullptr, 0);
+        }
+        return cmdAsm(args[1], off, ba, len);
+    }
+    for (const auto& a : args) {
+        if (a == "--behavior") {
+            bool ind = false;
+            for (const auto& b2 : args) if (b2 == "--indent" || b2 == "--pretty") ind = true;
+            return cmdBehavior(args[0], ind);
+        }
+        if (a == "--asm" || a == "--code" || a == "--disasm") {
+            uint64_t off = UINT64_MAX, ba = UINT64_MAX, len = UINT64_MAX;
+            for (size_t i = 1; i < args.size(); i++) {
+                if (args[i] == "--offset" && i + 1 < args.size()) off = strtoull(args[++i].c_str(), nullptr, 0);
+                else if (args[i] == "--base" && i + 1 < args.size()) ba = strtoull(args[++i].c_str(), nullptr, 0);
+                else if (args[i] == "--length" && i + 1 < args.size()) len = strtoull(args[++i].c_str(), nullptr, 0);
+            }
+            return cmdAsm(args[0], off, ba, len);
+        }
+    }
 
     return runSingle(args);
 }
