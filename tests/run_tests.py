@@ -262,6 +262,24 @@ def main():
     finally:
         os.remove(tz)
 
+    # Localization: --lang must never change the JSON contract keys, and it must
+    # localize the human (view) output.
+    r = subprocess.run([CLI, "--lang", "zh", os.path.join(FIX, "fixture_pe.exe"), "--json"], capture_output=True)
+    zj = json.loads(r.stdout)
+    check("i18n json keys english", set(zj) >= {"file", "hashes", "risk", "format", "indicators"})
+    r = subprocess.run([CLI, "--lang", "de", os.path.join(FIX, "fixture_pe.exe"), "--view"], capture_output=True)
+    de = r.stdout.decode("utf-8", "replace")
+    check("i18n de risk word", "Risiko" in de)
+    r = subprocess.run([CLI, "--lang", "es", os.path.join(FIX, "fixture_pe.exe"), "--view"], capture_output=True)
+    es = r.stdout.decode("utf-8", "replace")
+    check("i18n es path word", "Ruta" in es)
+    r = subprocess.run([CLI, "--lang", "ru", os.path.join(FIX, "fixture_pe.exe"), "--view"], capture_output=True)
+    ru = r.stdout.decode("utf-8", "replace")
+    check("i18n ru entropy word", "Энтропия" in ru)
+    r = subprocess.run([CLI, "--lang", "tr", os.path.join(FIX, "fixture_pe.exe"), "--view"], capture_output=True)
+    trs = r.stdout.decode("utf-8", "replace")
+    check("i18n tr size word", "Boyut" in trs and "Özetler" in trs)
+
     batchdir = FIX
     r = subprocess.run([CLI, "--batch", batchdir], capture_output=True)
     bd = json.loads(r.stdout)

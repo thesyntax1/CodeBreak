@@ -48,8 +48,30 @@ codebreak-cli --compare A B [--view]        # side-by-side structural + hash com
 codebreak-cli --batch DIR                   # scan a tree -> table on a tty, JSON when piped
 codebreak-cli --batch DIR --json F --csv F --html F   # export the batch three ways
 codebreak-cli --batch DIR --limit N --max-mb N        # bound the scan
+codebreak-cli --lang <code> <file> ...      # run with a localized terminal UI
 codebreak-cli --version | -h
 ```
+
+### Languages
+
+CodeBreak's terminal (human) output is available in **English (default)** plus
+**Türkçe / 简体中文 / Русский / Español / Deutsch / 日本語 / 한국어 / Français**. The machine
+contract is never translated: when output is piped/redirected the JSON keys and
+all parsed data stay in English so scripts are unaffected — only the on-screen
+human views and the interactive shell are localized.
+
+Choose a language with a flag or the environment variable:
+
+```sh
+codebreak-cli --lang de <file>       # German human summary
+CODEBREAK_LANG=fr codebreak-cli <file>
+codebreak-cli --lang zh --deep <file>
+```
+
+Language codes: `en` (default), `tr` (Türkçe), `zh` (简体中文), `ru`, `es`, `de`,
+`ja`, `ko`, `fr`. In the interactive shell, run `lang` to list the available
+languages and `lang <code>` (or `language <code>`) to switch on the fly — e.g.
+`lang tr`.
 
 Exit code 0 on success, 1 on error (message on stderr). `--report` and the batch `--html` flag write self-contained HTML reports.
 

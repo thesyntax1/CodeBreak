@@ -60,6 +60,121 @@ static void initColor() {
 #endif
 }
 
+// ---- Internationalization -------------------------------------------------
+// English is the base language and the fallback. Only terminal (human) views
+// are translated; the JSON contract keys and parsed data stay in English so
+// scripts and machine consumers are never affected.
+enum Lang { LANG_EN=0, LANG_ZH, LANG_RU, LANG_ES, LANG_DE, LANG_JA, LANG_KO, LANG_FR, LANG_TR, LANG_COUNT };
+static Lang g_lang = LANG_EN;
+
+static Lang langFromCode(const std::string& in) {
+    std::string c;
+    for (char ch : in) c += (char)((ch >= 'A' && ch <= 'Z') ? ch - 'A' + 'a' : ch);
+    if (c == "zh" || c == "zh-hans" || c == "zh-cn" || c == "cn" || c == "zh_cn") return LANG_ZH;
+    if (c == "ru") return LANG_RU;
+    if (c == "es") return LANG_ES;
+    if (c == "de") return LANG_DE;
+    if (c == "ja" || c == "jp") return LANG_JA;
+    if (c == "ko" || c == "kr") return LANG_KO;
+    if (c == "fr") return LANG_FR;
+    if (c == "tr") return LANG_TR;
+    return LANG_EN;
+}
+static const char* langCode(Lang l) {
+    switch (l) {
+    case LANG_ZH: return "zh"; case LANG_RU: return "ru"; case LANG_ES: return "es";
+    case LANG_DE: return "de"; case LANG_JA: return "ja"; case LANG_KO: return "ko";
+    case LANG_FR: return "fr"; case LANG_TR: return "tr"; default: return "en";
+    }
+}
+static const char* langNativeName(Lang l) {
+    switch (l) {
+    case LANG_ZH: return "简体中文"; case LANG_RU: return "Русский"; case LANG_ES: return "Español";
+    case LANG_DE: return "Deutsch"; case LANG_JA: return "日本語"; case LANG_KO: return "한국어";
+    case LANG_FR: return "Français"; case LANG_TR: return "Türkçe"; default: return "English";
+    }
+}
+
+struct Msg {
+    const char* en;      // canonical English key (also the EN translation)
+    const char* zh, *ru, *es, *de, *ja, *ko, *fr;
+    const char* tr;
+};
+// Column order: en, zh, ru, es, de, ja, ko, fr
+static const Msg kMsgs[] = {
+    { "Path", "路径", "Путь", "Ruta", "Pfad", "パス", "경로", "Chemin", "Yol" },
+    { "Size", "大小", "Размер", "Tamaño", "Größe", "サイズ", "크기", "Taille", "Boyut" },
+    { "Modified", "修改", "Изменён", "Modificado", "Geändert", "変更", "수정됨", "Modifié", "Değiştirilme" },
+    { "Created", "创建", "Создан", "Creado", "Erstellt", "作成", "생성됨", "Créé", "Oluşturulma" },
+    { "Format", "格式", "Формат", "Formato", "Format", "形式", "형식", "Format", "Biçim" },
+    { "Entropy", "熵", "Энтропия", "Entropía", "Entropie", "エントロピー", "엔트로피", "Entropie", "Entropi" },
+    { "Hashes", "哈希", "Хеши", "Hashes", "Prüfsummen", "ハッシュ", "해시", "Empreintes", "Özetler" },
+    { "Risk", "风险", "Риск", "Riesgo", "Risiko", "リスク", "위험", "Risque", "Risk" },
+    { "Indicators", "指示器", "Индикаторы", "Indicadores", "Indikatoren", "指標", "표시기", "Indicateurs", "Göstergeler" },
+    { "Level", "级别", "Уровень", "Nivel", "Stufe", "レベル", "수준", "Niveau", "Düzey" },
+    { "analysis time", "分析耗时", "время анализа", "tiempo de análisis", "Analysezeit", "解析時間", "분석 시간", "temps d'analyse", "analiz süresi" },
+    { "none found", "未找到", "ничего не найдено", "no se encontró nada", "nichts gefunden", "見つかりません", "찾을 수 없음", "rien trouvé", "hiçbiri bulunamadı" },
+    { "Host behavior (static)", "主机行为（静态）", "Поведение хоста (статический анализ)", "Comportamiento del host (estático)", "Host-Verhalten (statisch)", "ホスト動作（静的解析）", "호스트 동작(정적 분석)", "Comportement de l'hôte (statique)", "Konak davranışı (statik)" },
+    { "NETWORK TARGETS", "网络目标", "СЕТЕВЫЕ ЦЕЛИ", "OBJETIVOS DE RED", "NETZWERKZIELE", "ネットワーク対象", "네트워크 대상", "CIBLES RÉSEAU", "AĞ HEDEFLERİ" },
+    { "FILES / PATHS TOUCHED", "文件 / 路径", "ФАЙЛЫ И ПУТИ", "ARCHIVOS / RUTAS", "DATEIEN / PFADE", "ファイル・パス", "파일 / 경로", "FICHIERS / CHEMINS", "DOKUNULAN DOSYALAR / YOLLAR" },
+    { "COMMANDS / LAUNCHES", "命令 / 启动", "КОМАНДЫ / ЗАПУСК", "COMANDOS / LANZAMIENTOS", "BEFEHLE / STARTS", "コマンド・起動", "명령 / 실행", "COMMANDES / LANCEMENTS", "KOMUTLAR / BAŞLATMALAR" },
+    { "PERSISTENCE CANDIDATES", "持久化候选项", "Кандидаты автозапуска", "Candidatos a persistencia", "Persistenz-Kandidaten", "永続化の候補", "지속성 후보", "Candidats à la persistance", "KALICILIK ADAYLARI" },
+    { "(imported APIs)", "（导入的 API）", "(импортированные API)", "(API importadas)", "(importierte APIs)", "（インポート済み API）", "(가져온 API)", "(API importées)", "(içe aktarılan API'ler)" },
+    { "x86-64 disassembly", "x86-64 反汇编", "x86-64 дизассемблирование", "desensamblado x86-64", "x86-64 Disassemblierung", "x86-64 逆アセンブリ", "x86-64 디스어셈블리", "désassemblage x86-64", "x86-64 sökümü" },
+    { "no decodable code bytes", "没有可解码的代码字节", "нет декодируемых байтов кода", "no hay bytes de código descifrables", "keine dekodierbaren Codebytes", "デコード可能なコードバイトがありません", "디코딩 가능한 코드 바이트 없음", "aucun octet de code déchiffrable", "çözülebilir kod baytı yok" },
+    { "Call graph", "调用图", "Граф вызовов", "Grafo de llamadas", "Aufrufgraph", "コールグラフ", "호출 그래프", "Graphe d'appels", "Çağrı grafiği" },
+    { "functions", "函数", "функций", "funciones", "Funktionen", "関数", "함수", "fonctions", "işlev" },
+    { "direct calls", "直接调用", "прямых вызовов", "llamadas directas", "direkte Aufrufe", "直接呼び出し", "직접 호출", "appels directs", "doğrudan çağrı" },
+    { "indirect calls", "间接调用", "непрямых вызовов", "llamadas indirectas", "indirekte Aufrufe", "間接呼び出し", "간접 호출", "appels indirects", "dolaylı çağrı" },
+    { "calls:", "调用:", "вызовы:", "llamadas:", "Aufrufe:", "呼び出し:", "호출:", "appels :", "çağrılar:" },
+    { "(none)", "（无）", "(нет)", "(ninguno)", "(keine)", "（なし）", "(없음)", "(aucun)", "(yok)" },
+    { "called from:", "调用来源:", "вызывается из:", "llamado desde:", "aufgerufen von:", "呼び出し元:", "호출처:", "appelé depuis :", "çağrıldığı yer:" },
+    { "(entry)", "（入口）", "(вход)", "(entrada)", "(Einstieg)", "（入口）", "(진입점)", "(entrée)", "(giriş)" },
+    { "no internal direct callers", "无内部直接调用者", "нет внутренних прямых вызовов", "sin llamadas directas internas", "keine internen direkten Aufrufer", "内部の直接呼び出し元なし", "내부 직접 호출자 없음", "aucun appel direct interne", "iç doğrudan çağıran yok" },
+    { "batch scan of", "批量扫描", "пакетное сканирование", "escaneo por lotes", "Stapel-Scan", "一括スキャン", "일괄 스캔", "analyse par lot", "toplu tarama" },
+    { "compare", "比较", "сравнение", "comparar", "vergleichen", "比較", "비교", "comparer", "karşılaştır" },
+    { "identical", "相同", "идентичен", "idéntico", "identisch", "同一", "동일", "identique", "aynı" },
+    { "YES", "是", "ДА", "SÍ", "JA", "はい", "예", "OUI", "EVET" },
+    { "NO", "否", "НЕТ", "NO", "NEIN", "いいえ", "아니요", "NON", "HAYIR" },
+    { "open the interactive shell", "打开交互式命令行", "открыть интерактивную оболочку", "abrir la consola interactiva", "die interaktive Konsole öffnen", "対話型シェルを開く", "대화형 셸 열기", "ouvrir le shell interactif", "etkileşimli kabuğu aç" },
+    { "Available languages", "可用语言", "Доступные языки", "Idiomas disponibles", "Verfügbare Sprachen", "利用可能な言語", "사용 가능한 언어", "Langues disponibles", "Kullanılabilir diller" },
+    { "set language (default English)", "设置语言（默认英语）", "установить язык (по умолчанию английский)", "establecer idioma (inglés por defecto)", "Sprache festlegen (Standard: Englisch)", "言語を設定（既定：英語）", "언어 설정(기본: 영어)", "définir la langue (anglais par défaut)", "dili ayarla (varsayılan İngilizce)" },
+    { "Full analysis", "完整分析", "Полный анализ", "Análisis completo", "Vollständige Analyse", "完全な解析", "전체 분석", "Analyse complète", "Tam analiz" },
+    { "File", "文件", "Файл", "Archivo", "Datei", "ファイル", "파일", "Fichier", "Dosya" },
+    { "no suspicious network, file or process signals found", "未发现可疑的网络、文件或进程信号", "подозрительных сетевых, файловых или процессных сигналов не найдено", "no se encontraron señales sospechosas de red, archivos o procesos", "keine verdächtigen Netzwerk-, Datei- oder Prozesssignale gefunden", "不審なネットワーク・ファイル・プロセス信号は見つかりませんでした", "의심스러운 네트워크/파일/프로세스 신호를 찾지 못함", "aucun signal réseau, fichier ou processus suspect détecté", "şüpheli ağ, dosya veya işlem sinyali bulunamadı" },
+    { "(use 'asm' for the full listing)", "（完整列表请使用 'asm'）", "(для полного списка используйте 'asm')", "(use 'asm' para la lista completa)", "(verwenden Sie 'asm' für die volle Liste)", "（完全な一覧には 'asm' を使用）", "(전체 목록은 'asm' 사용)", "(utilisez 'asm' pour la liste complète)", "(tam liste için 'asm' kullanın)" },
+    { "strings of", "的字符串", "строки", "cadenas de", "Zeichenketten von", "の文字列", "의 문자열", "chaînes de", "" },
+    { "hex dump", "十六进制转储", "шестнадцатеричный дамп", "volcado hexadecimal", "Hex-Dump", "16進ダンプ", "16진 덤프", "vidage hexadécimal", "onaltılık döküm" },
+    { "none", "无", "нет", "ninguno", "keine", "なし", "없음", "aucun", "yok" },
+    { "called by", "被调用", "вызывается", "llamado por", "aufgerufen von", "呼び出し元", "호출됨", "appelé par", "tarafından çağrılıyor" },
+    { "no internal callers (reachable via branch or external)", "无内部调用者（可通过跳转或外部到达）", "нет внутренних вызовов (доступен через переход или внешне)", "sin llamadas internas (alcanzable por salto o externo)", "keine internen Aufrufer (über Sprung oder extern erreichbar)", "内部呼び出しなし（分岐または外部経由で到達可能）", "내부 호출자 없음(분기 또는 외부로 도달 가능)", "aucun appel interne (atteignable par branche ou externe)", "iç çağıran yok (dallanma veya dışarıdan erişilebilir)" },
+    { "NETWORK", "网络", "СЕТЬ", "RED", "NETZWERK", "ネットワーク", "네트워크", "RÉSEAU", "AĞ" },
+    { "FILE SYSTEM", "文件系统", "ФАЙЛОВАЯ СИСТЕМА", "SISTEMA DE ARCHIVOS", "DATEISYSTEM", "ファイルシステム", "파일 시스템", "SYSTÈME DE FICHIERS", "DOSYA SİSTEMİ" },
+    { "PROCESS / CODE", "进程 / 代码", "ПРОЦЕСС / КОД", "PROCESO / CÓDIGO", "PROZESS / CODE", "プロセス・コード", "프로세스 / 코드", "PROCESSUS / CODE", "İŞLEM / KOD" },
+    { "PERSISTENCE", "持久化", "АВТОЗАПУСК", "PERSISTENCIA", "PERSISTENZ", "永続化", "지속성", "PERSISTANCE", "KALICILIK" },
+    { "strings", "字符串", "строки", "cadenas", "Zeichenketten", "文字列", "문자열", "chaînes", "Dizeler" },
+    { "Language set", "语言已设置", "язык установлен", "idioma establecido", "Sprache festgelegt", "言語を設定しました", "언어 설정 완료", "langue définie", "Dil ayarlandı" },
+};
+static size_t kMsgCount = sizeof(kMsgs) / sizeof(kMsgs[0]);
+
+static const char* msgAt(const Msg& m, Lang l) {
+    switch (l) {
+    case LANG_ZH: return m.zh; case LANG_RU: return m.ru; case LANG_ES: return m.es;
+    case LANG_DE: return m.de; case LANG_JA: return m.ja; case LANG_KO: return m.ko;
+    case LANG_FR: return m.fr; case LANG_TR: return m.tr; default: return m.en;
+    }
+}
+// tr(key): localized string, or the English key when no entry / English active.
+static std::string tr(const std::string& key) {
+    if (g_lang == LANG_EN) return key;
+    for (size_t i = 0; i < kMsgCount; i++) {
+        if (key == kMsgs[i].en) return msgAt(kMsgs[i], g_lang);
+    }
+    return key; // graceful English fallback
+}
+
+static void setLanguage(const std::string& code) { g_lang = langFromCode(code); }
+
 static std::string riskColor(const std::string& level) {
     std::string l = level;
     for (auto& c : l) if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
@@ -234,23 +349,23 @@ static void renderHuman(const JVal& doc, const std::string& path, double ms) {
     s += "\n";
     s += CYN() + "========== " + B() + name + R() + CYN() + " ==========" + R() + "\n";
     s += "\n";
-    s += padTo("  Path", 12) + WHT() + path + R() + "\n";
+    s += padTo("  " + tr("Path"), 12) + " " + WHT() + path + R() + "\n";
     if (file) {
         double sz = file->getNum("size");
         std::string szs = file->getStr("sizeHuman") + "  (" + std::to_string((long long)sz) + " bytes)";
-        s += padTo("  Size", 12) + szs + "\n";
-        if (!file->getStr("modified").empty()) s += padTo("  Modified", 12) + file->getStr("modified") + "\n";
-        if (!file->getStr("created").empty()) s += padTo("  Created", 12) + file->getStr("created") + "\n";
+        s += padTo("  " + tr("Size"), 12) + " " + szs + "\n";
+        if (!file->getStr("modified").empty()) s += padTo("  " + tr("Modified"), 12) + " " + file->getStr("modified") + "\n";
+        if (!file->getStr("created").empty()) s += padTo("  " + tr("Created"), 12) + " " + file->getStr("created") + "\n";
     }
-    if (fmt) s += padTo("  Format", 12) + WHT() + fmt->getStr("label") + R() + "\n";
+    if (fmt) s += padTo("  " + tr("Format"), 12) + " " + WHT() + fmt->getStr("label") + R() + "\n";
     if (ent) {
         char eb[40];
         snprintf(eb, sizeof(eb), "%.2f / 8.00", ent->getNum("overall", 0));
-        s += padTo("  Entropy", 12) + eb + "\n";
+        s += padTo("  " + tr("Entropy"), 12) + " " + eb + "\n";
     }
     if (hashes) {
         s += "\n";
-        s += CYN() + "========== " + "Hashes" + " ==========" + R() + "\n";
+        s += CYN() + "========== " + tr("Hashes") + " ==========" + R() + "\n";
         s += "  SHA-256  " + WHT() + hashes->getStr("sha256") + R() + "\n";
         s += "  SHA-1    " + hashes->getStr("sha1") + "\n";
         s += "  MD5      " + hashes->getStr("md5") + "\n";
@@ -260,8 +375,8 @@ static void renderHuman(const JVal& doc, const std::string& path, double ms) {
         std::string lvl = risk->getStr("level");
         long long score = (long long)risk->getNum("score", 0);
         s += "\n";
-        s += CYN() + "========== " + "Risk" + " ==========" + R() + "\n";
-        s += "  " + B() + riskColor(lvl) + "RISK " + lvl + " " + std::to_string(score) + "/100" + R() + "\n";
+        s += CYN() + "========== " + tr("Risk") + " ==========" + R() + "\n";
+        s += "  " + B() + riskColor(lvl) + tr("Risk") + " " + lvl + " " + std::to_string(score) + "/100" + R() + "\n";
         std::string summary = risk->getStr("summary");
         if (!summary.empty()) s += "  " + DIM() + summary + R() + "\n";
         const JVal* tf = risk->get("topFindings");
@@ -273,7 +388,7 @@ static void renderHuman(const JVal& doc, const std::string& path, double ms) {
     }
     if (inds && inds->type == JVal::ARR && !inds->arr.empty()) {
         s += "\n";
-        s += CYN() + "========== " + "Indicators" + " ==========" + R() + "\n";
+        s += CYN() + "========== " + tr("Indicators") + " ==========" + R() + "\n";
         for (const JVal& i : inds->arr) {
             int sev = i.getInt("severityNum", i.getInt("severity", 0));
             s += "  " + B() + "[" + sevColor(sev) + i.getStr("severity") + R() + B() + "]" + R() + " " +
@@ -284,7 +399,7 @@ static void renderHuman(const JVal& doc, const std::string& path, double ms) {
     }
     char buf[48];
     snprintf(buf, sizeof(buf), "%.2f ms", ms);
-    s += "\n" + DIM() + "analysis time: " + buf + R() + "\n";
+    s += "\n" + DIM() + tr("analysis time") + ": " + buf + R() + "\n";
     o(s);
 }
 
@@ -308,7 +423,7 @@ static void renderStringsHuman(const std::string& path, const std::string& pat,
     const JVal* items = doc.get("items");
     std::string s;
     s += "\n";
-    s += CYN() + "========== " + "strings of " + fileBase(path) + " ==========" + R() + "\n";
+    s += CYN() + "========== " + tr("strings") + " - " + fileBase(path) + " ==========" + R() + "\n";
     if (items) {
         for (const JVal& it : items->arr) {
             char o2[32];
@@ -328,7 +443,7 @@ static void renderHexHuman(const std::string& path, uint64_t off, uint64_t len) 
     uint64_t end = off + len < d.size() ? off + len : d.size();
     std::string s;
     s += "\n";
-    s += CYN() + "========== " + "hex " + fileBase(path) + " @ " + hexU(off) + " ==========" + R() + "\n";
+    s += CYN() + "========== " + tr("hex dump") + " - " + fileBase(path) + " @ " + hexU(off) + " ==========" + R() + "\n";
     for (uint64_t row = off; row < end; row += 16) {
         char r2[32];
         snprintf(r2, sizeof(r2), "0x%08llx", (unsigned long long)row);
@@ -394,35 +509,35 @@ static std::string asciiLowerName(const std::string& p) {
 static std::string behaviorHumanText(const BehaviorResult& br) {
     std::string s;
     s += "\n";
-    s += CYN() + "========== Host behavior (static) ==========" + R() + "\n";
+    s += CYN() + "========== " + tr("Host behavior (static)") + " ==========" + R() + "\n";
     if (br.endpoints.empty() && br.filePaths.empty() && br.commands.empty() &&
         br.persistence.empty() && br.networkApis.empty() && br.fileApis.empty() &&
         br.processApis.empty() && br.persistenceApis.empty()) {
-        s += "  " + DIM() + "no suspicious network, file or process signals found" + R() + "\n";
+        s += "  " + DIM() + tr("no suspicious network, file or process signals found") + R() + "\n";
         return s;
     }
     if (!br.endpoints.empty()) {
-        s += "\n" + B() + WHT() + "NETWORK TARGETS" + R() + "\n";
+        s += "\n" + B() + WHT() + tr("NETWORK TARGETS") + R() + "\n";
         for (const auto& e : br.endpoints) {
             const char* tag = e.kind == "url" ? "url   " : e.kind == "ip" ? "ip    " : e.kind == "email" ? "email " : "domain";
             s += "  " + (e.kind == "ip" ? YEL() : GRN()) + "[" + std::string(tag) + "]" + R() + " " + WHT() + e.value + R() + "\n";
         }
     }
     if (!br.filePaths.empty()) {
-        s += "\n" + B() + WHT() + "FILES / PATHS TOUCHED" + R() + "\n";
+        s += "\n" + B() + WHT() + tr("FILES / PATHS TOUCHED") + R() + "\n";
         for (const auto& p : br.filePaths) s += "  " + CYN() + p + R() + "\n";
     }
     if (!br.commands.empty()) {
-        s += "\n" + B() + WHT() + "COMMANDS / LAUNCHES" + R() + "\n";
+        s += "\n" + B() + WHT() + tr("COMMANDS / LAUNCHES") + R() + "\n";
         for (const auto& c : br.commands) s += "  " + RED() + c + R() + "\n";
     }
     if (!br.persistence.empty()) {
-        s += "\n" + B() + WHT() + "PERSISTENCE CANDIDATES" + R() + "\n";
+        s += "\n" + B() + WHT() + tr("PERSISTENCE CANDIDATES") + R() + "\n";
         for (const auto& p : br.persistence) s += "  " + YEL() + p + R() + "\n";
     }
     auto apiBlock = [&](const char* title, const std::vector<std::string>& apis) {
         if (apis.empty()) return;
-        s += "\n" + B() + WHT() + std::string(title) + " (imported APIs)" + R() + "\n";
+        s += "\n" + B() + WHT() + std::string(title) + tr("(imported APIs)") + R() + "\n";
         std::string line = "  ";
         for (size_t i = 0; i < apis.size(); i++) {
             line += DIM() + apis[i] + R();
@@ -431,10 +546,10 @@ static std::string behaviorHumanText(const BehaviorResult& br) {
         }
         if (line != "  ") s += line + "\n";
     };
-    apiBlock("NETWORK", br.networkApis);
-    apiBlock("FILE SYSTEM", br.fileApis);
-    apiBlock("PROCESS / CODE", br.processApis);
-    apiBlock("PERSISTENCE", br.persistenceApis);
+    apiBlock(tr("NETWORK").c_str(), br.networkApis);
+    apiBlock(tr("FILE SYSTEM").c_str(), br.fileApis);
+    apiBlock(tr("PROCESS / CODE").c_str(), br.processApis);
+    apiBlock(tr("PERSISTENCE").c_str(), br.persistenceApis);
     return s;
 }
 
@@ -542,7 +657,7 @@ static std::string asmHumanText(const std::vector<AsmLine>& lines, uint64_t base
     std::string s;
     s += "\n";
     std::string t = section.empty() ? std::string("code") : section;
-    s += CYN() + "========== " + t + " (x86-64 disassembly) ==========" + R() + "\n";
+    s += CYN() + "========== " + t + " - " + tr("x86-64 disassembly") + " ==========" + R() + "\n";
     char sb[64];
     snprintf(sb, sizeof(sb), "%s @ 0x%llx  (%llu bytes)", section.empty() ? "code" : section.c_str(),
              (unsigned long long)base, (unsigned long long)length);
@@ -550,7 +665,7 @@ static std::string asmHumanText(const std::vector<AsmLine>& lines, uint64_t base
     size_t n = 0;
     for (const AsmLine& L : lines) {
         if (limit && n >= limit) {
-            s += DIM() + "  ... (use 'asm' for the full listing)" + R() + "\n";
+            s += DIM() + "  ... " + tr("(use 'asm' for the full listing)") + R() + "\n";
             break;
         }
         std::string lb = labFor(L.addr);
@@ -569,7 +684,7 @@ static std::string asmHumanText(const std::vector<AsmLine>& lines, uint64_t base
         s += ln + "\n";
         n++;
     }
-    if (lines.empty()) s += DIM() + "  no decodable code bytes" + R() + "\n";
+    if (lines.empty()) s += DIM() + "  " + tr("no decodable code bytes") + R() + "\n";
     return s;
 }
 
@@ -900,15 +1015,16 @@ static int cmdGraph(const std::string& path, bool wantDot, bool wantIndent) {
     }
     if (human) {
         std::string s;
-        s += "\n" + CYN() + "========== Call graph (" + section + ") ==========" + R() + "\n";
+        s += "\n" + CYN() + "========== " + tr("Call graph") + " (" + section + ") ==========" + R() + "\n";
         char st[96];
-        snprintf(st, sizeof(st), "  %s @ 0x%llx  |  %zu functions  |  %zu direct calls  |  %zu indirect calls",
-                 section.empty() ? "code" : section.c_str(), (unsigned long long)base,
-                 funcs.size(), directCalls, indirectCalls);
-        s += DIM() + st + R() + "\n";
+        snprintf(st, sizeof(st), "  %s @ 0x%llx", section.empty() ? "code" : section.c_str(), (unsigned long long)base);
+        std::string stat = std::string(st) + "  |  " + std::to_string(funcs.size()) + " " + tr("functions") +
+                           "  |  " + std::to_string(directCalls) + " " + tr("direct calls") +
+                           "  |  " + std::to_string(indirectCalls) + " " + tr("indirect calls");
+        s += DIM() + stat + R() + "\n";
         for (uint64_t f : funcs) {
             s += "\n" + B() + WHT() + "  " + fname(f) + R() + DIM() + "  @ 0x" + hexId(f) + R();
-            if (f == entryVA) s += "  " + DIM() + "(entry)" + R();
+            if (f == entryVA) s += "  " + DIM() + tr("(entry)") + R();
             s += "\n";
             std::vector<std::string> callees;
             auto it = outInt.find(f);
@@ -916,9 +1032,9 @@ static int cmdGraph(const std::string& path, bool wantDot, bool wantIndent) {
             auto it2 = outExt.find(f);
             if (it2 != outExt.end()) for (const std::string& t : it2->second) callees.push_back(t);
             if (callees.empty()) {
-                s += DIM() + "      calls: (none)" + R() + "\n";
+                s += DIM() + "      " + tr("calls:") + " " + tr("(none)") + R() + "\n";
             } else {
-                std::string line = "      calls: ";
+                std::string line = "      " + tr("calls:") + " ";
                 for (size_t i = 0; i < callees.size(); i++) {
                     line += CYN() + callees[i] + R();
                     if (i + 1 < callees.size()) line += ", ";
@@ -928,7 +1044,7 @@ static int cmdGraph(const std::string& path, bool wantDot, bool wantIndent) {
             auto c = inCnt.find(f);
             int callers = c == inCnt.end() ? 0 : c->second;
             if (callers) {
-                s += DIM() + "      called from: ";
+                s += DIM() + "      " + tr("called from:") + " ";
                 auto ci = callersOf.find(f);
                 std::string sites;
                 if (ci != callersOf.end())
@@ -939,7 +1055,7 @@ static int cmdGraph(const std::string& path, bool wantDot, bool wantIndent) {
                     }
                 s += sites + R() + "\n";
             } else if (f != entryVA) {
-                s += DIM() + "      no internal direct callers" + R() + "\n";
+                s += DIM() + "      " + tr("no internal direct callers") + R() + "\n";
             }
         }
         o(s);
@@ -1162,8 +1278,8 @@ static int cmdBatch(const std::vector<std::string>& args) {
     bool table = stdoutIsTty() && jsonPath.empty() && htmlPath.empty() && csvPath.empty();
     if (table) {
         fprintf(stdout, "\n");
-        rule(" batch scan of " + dir);
-        fprintf(stdout, "  %-46s %-6s %6s %-8s %-9s %s\n", "Path", "Format", "Size", "Risk", "Level", "SHA-256");
+        rule(" " + tr("batch scan of") + "  " + dir);
+        fprintf(stdout, "  %-46s %-6s %6s %-8s %-9s %s\n", tr("Path").c_str(), tr("Format").c_str(), tr("Size").c_str(), tr("Risk").c_str(), tr("Level").c_str(), "SHA-256");
         for (auto& it : items) {
             std::string shortPath = it.path;
             if (shortPath.size() > 46) shortPath = "..." + shortPath.substr(shortPath.size() - 43);
@@ -1236,11 +1352,11 @@ static int cmdCompare(const std::vector<std::string>& args) {
         std::string rlb = rb ? rb->getStr("level") : "-";
         std::string s;
         s += "\n";
-        s += CYN() + "========== " + "compare" + " ==========" + R() + "\n\n";
+        s += CYN() + "========== " + tr("compare") + " ==========" + R() + "\n\n";
         bool id = (sa == sb && sa.size() == 64);
-        s += "  identical       " + (id ? GRN() + "YES" : RED() + "NO") + R() + "\n";
+        s += "  " + padTo(tr("identical"),14) + (id ? GRN() + tr("YES") : RED() + tr("NO")) + R() + "\n";
         s += "  sha256Equal     " + std::string(sa == sb ? "true" : "false") + "\n\n";
-        s += "  " + padTo("File", 40) + " " + padTo("Format", 30) + " " + padTo("Risk", 9) + " SHA-256\n";
+        s += "  " + padTo(tr("File"), 40) + " " + padTo(tr("Format"), 30) + " " + padTo(tr("Risk"), 9) + " SHA-256\n";
         s += "  " + padTo(fileBase(args[0]), 40) + " " + padTo(la, 30) + " " +
              B() + riskColor(rla) + padTo(rla + " " + std::to_string(rsa), 9) + R() + " " + sa.substr(0, 16) + "\n";
         s += "  " + padTo(fileBase(args[1]), 40) + " " + padTo(lb, 30) + " " +
@@ -1283,6 +1399,10 @@ static void printUsage() {
         "  codebreak-cli <file>                       analyze a file\n"
         "        prints a colored human summary on a terminal,\n"
         "        or raw JSON when piped/redirected\n"
+        "\n"
+        "  codebreak-cli --lang <code> <file> ...     run with output language\n"
+        "        <code>: en | tr | zh | ru | es | de | ja | ko | fr (default en)\n"
+        "        (or set the CODEBREAK_LANG environment variable)\n"
         "\n"
         "  codebreak-cli <file> --view                force human summary\n"
         "  codebreak-cli <file> --json                force raw JSON\n"
@@ -1327,6 +1447,7 @@ static void printHelp() {
         "  batch <dir>          scan a directory\n"
         "  report <file>        write an HTML report\n"
         "  version / help / clear / exit\n"
+        "  lang / lang <code>    show or switch output language\n"
         "\n");
 }
 
@@ -1384,6 +1505,19 @@ static int runTokens(const std::vector<std::string>& args) {
         return cmdHash(args[1]);
     }
     if (first == "--version" || first == "version") { printf("CodeBreak v%s\n", CB_VERSION); return 0; }
+    if (first == "lang" || first == "language" || first == "--lang" || first == "--language") {
+        if (args.size() >= 2) {
+            setLanguage(args[1]);
+            printf("%s: %s (%s)\n", tr("Language set").c_str(), langNativeName(g_lang), langCode(g_lang));
+            return 0;
+        }
+        printf("%s:\n", tr("Available languages").c_str());
+        const Lang order[] = { LANG_EN, LANG_TR, LANG_ZH, LANG_RU, LANG_ES, LANG_DE, LANG_JA, LANG_KO, LANG_FR };
+        for (Lang l : order)
+            printf("  %-6s %s%s\n", langCode(l), langNativeName(l), l == g_lang ? "  *" : "");
+        printf("\n%s\n", tr("set language (default English)").c_str());
+        return 0;
+    }
     if (first == "--behavior" || first == "-be" || first == "behavior") {
         if (args.size() < 2) { fprintf(stderr, "usage: behavior <file>\n"); return 2; }
         bool bIndent = false;
@@ -1524,10 +1658,22 @@ static void runInteractive() {
 
 int main(int argc, char** argv) {
     initColor();
-    if (argc < 2) {
+    // Language precedence: CODEBREAK_LANG env, then a --lang/-L/--language flag.
+    const char* envLang = getenv("CODEBREAK_LANG");
+    if (envLang && *envLang) setLanguage(envLang);
+    std::vector<std::string> args;
+    if (argc >= 2) {
+        for (int i = 1; i < argc; i++) {
+            std::string a = argv[i];
+            if (a == "--lang" || a == "-L" || a == "--language" || a == "--idioma") {
+                if (i + 1 < argc) { setLanguage(argv[++i]); continue; }
+            }
+            args.push_back(a);
+        }
+    }
+    if (args.empty()) {
         runInteractive();
         return 0;
     }
-    std::vector<std::string> args(argv + 1, argv + argc);
     return runTokens(args);
 }
