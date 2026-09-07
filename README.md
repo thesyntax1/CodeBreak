@@ -128,6 +128,15 @@ The host and the UI talk over `window.chrome.webview.postMessage` with request/r
 
 To regenerate the application icon after editing `tools/make_icon.py`, run `python tools/make_icon.py` and rebuild.
 
+## Continuous integration
+
+`.github/workflows/build.yml` runs on every push, pull request and on demand (Actions -> `build` -> Run workflow). It has two jobs:
+
+- **Windows x64 (MSVC)** — configures `-A x64` and builds the full release, then uploads an artifact named `codebreak-windows-x64` containing `CodeBreak.exe`, `codebreak-cli.exe` and the WebView2 runtime loader (`WebView2Loader.dll`) so the GUI runs on any Windows machine with the WebView2 Runtime.
+- **Linux CLI + tests** — builds `codebreak-cli` with the GUI disabled, regenerates every fixture and runs the full `tests/run_tests.py` suite, then uploads the `codebreak-linux-cli` artifact.
+
+Grab the built exe from the workflow's **Artifacts** panel on the Actions tab (a workflow run must finish first; push a tag `v*` or click *Run workflow* to trigger a build).
+
 ## Testing
 
 ```sh

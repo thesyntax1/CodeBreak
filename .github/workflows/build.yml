@@ -1,0 +1,67 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: "4"
+
+jobs:
+  windows-exe:
+    name: Windows x64 (CodeBreak.exe + codebreak-cli.exe)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (MSVC x64)
+        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: List outputs
+        run: Get-ChildItem build/Release | Select-Object Name, Length
+
+      - name: Upload Windows binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: codebreak-windows-x64
+          path: |
+            build/Release/CodeBreak.exe
+            build/Release/codebreak-cli.exe
+            build/Release/WebView2Loader.dll
+          if-no-files-found: error
+
+  linux-cli-and-tests:
+    name: Linux CLI build + test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential openssl
+
+      - name: Configure
+        run: cmake -S . -B build -DCB_BUILD_GUI=OFF -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Generate fixtures
+        run: python3 tools/make_fixtures.py
+
+      - name: Run test suite
+        env:
+          CB_CLI: ${{ github.workspace }}/build/codebreak-cli
+        run: python3 tests/run_tests.py
+
+      - name: Upload Linux CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: codebreak-linux-cli
+          path: build/codebreak-cli
+          if-no-files-found: error
