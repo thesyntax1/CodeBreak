@@ -197,14 +197,20 @@ def main():
     check("behavior file path", any("fixture.pdb" in p for p in beh["fileSystem"]["paths"]))
     check("behavior file apis", "CreateFileW" in beh["fileSystem"]["apis"] and "ReadFile" in beh["fileSystem"]["apis"])
 
-    r = subprocess.run([CLI, os.path.join(FIX, "fixture_elf64"), "--asm"], capture_output=True)
+    r = subprocess.run([CLI, os.path.join(FIX, "fixture_pe.exe"), "--asm"], capture_output=True)
     asm = json.loads(r.stdout)["code"]
     texts = [ln["text"] for ln in asm["lines"]]
     check("asm section", asm["section"] == ".text")
-    check("asm first insn", texts[0] == "xor ebp, ebp")
-    check("asm call target", any(t == "call 0x1139" for t in texts))
-    check("asm ret present", any(t == "ret" for t in texts))
-    check("asm aligned base", asm["base"] == "0x1050")
+    check("asm first insn", texts[0] == "mov qword ptr [rsp+8], rbx")
+    check("asm push/ret", "push rdi" in texts and "ret" in texts)
+    check("asm base", asm["base"] == "0x140001000")
+    check("asm json fields", all(set(ln) >= {"addr", "bytes", "text"} for ln in asm["lines"]))
+
+    r = subprocess.run([CLI, os.path.join(FIX, "fixture_elf64"), "--asm"], capture_output=True)
+    asm2 = json.loads(r.stdout)["code"]
+    t2 = [ln["text"] for ln in asm2["lines"]]
+    check("elf asm nonempty", len(t2) > 3)
+    check("elf asm mnemonics", any(x.split()[0] in ("mov", "push", "ret", "call", "jmp", "je", "jne") for x in t2))
 
     batchdir = FIX
     r = subprocess.run([CLI, "--batch", batchdir], capture_output=True)

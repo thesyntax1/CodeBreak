@@ -86,52 +86,48 @@ ModRM readModRM(Cur& c, const Dec& dec, int rWidth) {
         m.rm = rWidth == 1 ? name8(idx, true) : nameReg(rWidth, idx);
         return m;
     }
-    bool ripRel = (mod == 0 && rm == 5);
+    bool hasSib = (rm == 4);
+    int scale = 1, index = -1, base = -1;
+    bool baseIsRip = false;
+    if (hasSib) {
+        uint8_t sib = c.next();
+        scale = 1 << ((sib >> 6) & 3);
+        int iField = (sib >> 3) & 7;
+        int bField = sib & 7;
+        if (!(iField == 4 && !dec.rexX)) index = iField + (dec.rexX ? 8 : 0);
+        if (!(mod == 0 && bField == 5)) base = bField + (dec.rexB ? 8 : 0);
+    } else {
+        if (mod == 0 && rm == 5) baseIsRip = true;
+        else base = rm + (dec.rexB ? 8 : 0);
+    }
     int64_t disp = 0;
     if (mod == 1) disp = c.s8();
     else if (mod == 2) disp = c.s32();
-    else if (ripRel) disp = c.s32();
+    else if (baseIsRip || (hasSib && base < 0)) disp = c.s32();
 
     std::string s = "[";
-    std::string idxPart;
-    if (ripRel) {
+    if (baseIsRip) {
         s += "rip";
         if (disp) s += (disp < 0 ? "-" : "+") + immStr(disp < 0 ? -disp : disp);
         s += "]";
         m.rm = s;
         return m;
     }
-    bool noIdx = false;
-    if (rm == 4) {
-        uint8_t sib = c.next();
-        int scale = 1 << ((sib >> 6) & 3);
-        int index = (sib >> 3) & 7;
-        int base = sib & 7;
-        int idxR = index + (dec.rexX ? 8 : 0);
-        int baseR = base + (dec.rexB ? 8 : 0);
-        if (!(index == 4 && !dec.rexX)) {
-            std::string iv = R64[idxR & 15];
+    std::string body;
+    if (hasSib) {
+        if (base >= 0) body += R64[base & 15];
+        std::string iv;
+        if (index >= 0) {
+            iv = R64[index & 15];
             if (scale > 1) iv += "*" + std::to_string(scale);
-            idxPart = iv;
-            noIdx = true;
         }
-        if (mod == 0 && base == 5) {
-
-            if (disp) s += immStr(disp);
-            else s += "0";
-        } else {
-            s += R64[baseR & 15];
-        }
+        if (!body.empty() && !iv.empty()) body += "+" + iv;
+        else if (body.empty()) body = iv;
     } else {
-        int baseR = rm + (dec.rexB ? 8 : 0);
-        s += R64[baseR & 15];
+        body = R64[base & 15];
     }
-    if (noIdx) {
-        if (!idxPart.empty()) {
-            if (s.size() == 1) s += idxPart;
-            else s += "+" + idxPart;
-        }
-    }
+    if (body.empty()) body = "0";
+    s += body;
     if (disp) s += (disp < 0 ? "-" : "+") + immStr(disp < 0 ? -disp : disp);
     s += "]";
     m.rm = s;
