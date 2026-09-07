@@ -20,21 +20,8 @@ jobs:
       - name: Configure (MSVC x64)
         run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build (capture log)
-        id: build
-        continue-on-error: true
-        shell: bash
-        run: |
-          cmake --build build --config Release > build.log 2>&1
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
-          tail -n 60 build.log
-
-      - name: Annotate build errors
-        if: steps.build.outcome == 'failure'
-        shell: bash
-        run: |
-          grep -inE "error|fatal" build.log | head -n 60 | sed 's/^/::error::/'
-          if [ "${{ steps.build.outputs.exit_code }}" != "0" ]; then exit "${{ steps.build.outputs.exit_code }}"; fi
+      - name: Build
+        run: cmake --build build --config Release
 
       - name: Upload Windows binaries
         uses: actions/upload-artifact@v4
