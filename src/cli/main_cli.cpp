@@ -391,7 +391,7 @@ static std::string asciiLowerName(const std::string& p) {
     return r;
 }
 
-static void renderBehaviorHuman(const BehaviorResult& br) {
+static std::string behaviorHumanText(const BehaviorResult& br) {
     std::string s;
     s += "\n";
     s += CYN() + "========== Host behavior (static) ==========" + R() + "\n";
@@ -399,8 +399,7 @@ static void renderBehaviorHuman(const BehaviorResult& br) {
         br.persistence.empty() && br.networkApis.empty() && br.fileApis.empty() &&
         br.processApis.empty() && br.persistenceApis.empty()) {
         s += "  " + DIM() + "no suspicious network, file or process signals found" + R() + "\n";
-        o(s);
-        return;
+        return s;
     }
     if (!br.endpoints.empty()) {
         s += "\n" + B() + WHT() + "NETWORK TARGETS" + R() + "\n";
@@ -436,7 +435,7 @@ static void renderBehaviorHuman(const BehaviorResult& br) {
     apiBlock("FILE SYSTEM", br.fileApis);
     apiBlock("PROCESS / CODE", br.processApis);
     apiBlock("PERSISTENCE", br.persistenceApis);
-    o(s);
+    return s;
 }
 
 static int cmdBehavior(const std::string& path, bool indent) {
@@ -453,7 +452,7 @@ static int cmdBehavior(const std::string& path, bool indent) {
     writeBehaviorJson(b, br);
     b.endObj();
     bool human = !indent && stdoutIsTty();
-    if (human) { renderBehaviorHuman(br); return 0; }
+    if (human) { o(behaviorHumanText(br)); return 0; }
     printf("%s\n", indent ? prettyJson(j).c_str() : j.c_str());
     return 0;
 }
@@ -502,10 +501,75 @@ static const JVal* findCodeSection(const JVal& doc, std::string& nameOut) {
     return nullptr;
 }
 
+
 static std::string asmHexByte(uint8_t c) {
     static const char* h = "0123456789abcdef";
     std::string s;
     s += h[c >> 4]; s += h[c & 15];
+    return s;
+}
+
+static std::string hexId(uint64_t v) {
+    std::string h = hexU(v, 0);
+    return (h.size() > 2 && h[0] == '0' && (h[1] == 'x' || h[1] == 'X')) ? h.substr(2) : h;
+}
+
+static std::string asmHumanText(const std::vector<AsmLine>& lines, uint64_t base, uint64_t length,
+                                const std::string& section, size_t limit) {
+    std::vector<uint64_t> subs, locs;
+    uint64_t hi = base + (length ? length : 0);
+    for (const AsmLine& L : lines) {
+        if (!L.hasTarget || L.target < base || (hi && L.target > hi)) continue;
+        if (L.isCall) subs.push_back(L.target);
+        else locs.push_back(L.target);
+    }
+    std::vector<std::pair<uint64_t, std::string>> lab;
+    for (uint64_t a : subs) {
+        bool d = false;
+        for (auto& q : lab) if (q.first == a) { d = true; break; }
+        if (!d) lab.push_back({ a, "sub_" + hexId(a) });
+    }
+    for (uint64_t a : locs) {
+        bool d = false;
+        for (auto& q : lab) if (q.first == a) { d = true; break; }
+        if (!d) lab.push_back({ a, "loc_" + hexId(a) });
+    }
+    auto labFor = [&](uint64_t a) {
+        for (auto& q : lab) if (q.first == a) return q.second;
+        return std::string();
+    };
+
+    std::string s;
+    s += "\\n";
+    std::string t = section.empty() ? std::string("code") : section;
+    s += CYN() + "========== " + t + " (x86-64 disassembly) ==========" + R() + "\\n";
+    char sb[64];
+    snprintf(sb, sizeof(sb), "%s @ 0x%llx  (%llu bytes)", section.empty() ? "code" : section.c_str(),
+             (unsigned long long)base, (unsigned long long)length);
+    s += DIM() + "  " + sb + R() + "\\n\\n";
+    size_t n = 0;
+    for (const AsmLine& L : lines) {
+        if (limit && n >= limit) {
+            s += DIM() + "  ... (use 'asm' for the full listing)" + R() + "\\n";
+            break;
+        }
+        std::string lb = labFor(L.addr);
+        if (!lb.empty()) s += B() + WHT() + "        " + lb + ":" + R() + "\\n";
+        char ad[24];
+        snprintf(ad, sizeof(ad), "0x%06llx", (unsigned long long)L.addr);
+        std::string ln = "  " + CYN() + ad + R() + "  ";
+        std::string bytes = L.bytes;
+        if (bytes.size() < 23) bytes.append(23 - bytes.size(), ' ');
+        ln += DIM() + bytes + R() + "  ";
+        ln += WHT() + L.text + R();
+        if (L.hasTarget) {
+            std::string lf = labFor(L.target);
+            if (!lf.empty()) ln += "  " + DIM() + "; " + lf + R();
+        }
+        s += ln + "\\n";
+        n++;
+    }
+    if (lines.empty()) s += DIM() + "  no decodable code bytes" + R() + "\\n";
     return s;
 }
 
@@ -589,26 +653,108 @@ static int cmdAsm(const std::string& path, uint64_t setOff, uint64_t setBase, ui
     b.endObj();
 
     if (!stdoutIsTty()) { printf("%s\n", j.c_str()); return 0; }
-    std::string s;
-    s += "\n";
-    std::string secTitle = section.empty() ? std::string("code") : section;
-    s += CYN() + "========== " + secTitle + " (x86-64 disassembly) ==========" + R() + "\n";
-    char sb[64];
-    snprintf(sb, sizeof(sb), "%s @ 0x%llx  (%llu bytes)", section.empty() ? "code" : section.c_str(),
-             (unsigned long long)base, (unsigned long long)length);
-    s += DIM() + "  " + sb + R() + "\n\n";
-    for (const AsmLine& L : lines) {
-        char ad[24];
-        snprintf(ad, sizeof(ad), "0x%06llx", (unsigned long long)L.addr);
-        std::string ln = "  " + CYN() + ad + R() + "  ";
-        std::string bytes = L.bytes;
-        if (bytes.size() < 23) bytes.append(23 - bytes.size(), ' ');
-        ln += DIM() + bytes + R() + "  ";
-        ln += WHT() + L.text + R();
-        s += ln + "\n";
+    o(asmHumanText(lines, base, length, section, 0));
+    return 0;
+}
+
+static int cmdDeep(const std::string& path, bool indent) {
+    std::vector<uint8_t> d;
+    std::string err;
+    if (!readFileBytes(path, d, err)) { fprintf(stderr, "error: %s\n", err.c_str()); return 1; }
+    Analysis a = analyzePath(path);
+    if (!a.ok) { fprintf(stderr, "error: %s\n", a.error.c_str()); return 1; }
+    std::vector<std::string> imports;
+    collectImports(a.doc, imports);
+    BehaviorResult br = analyzeBehavior(d.data(), d.size(), imports, asciiLowerName(path));
+
+    std::vector<AsmLine> clines;
+    uint64_t cbase = 0, clen = 0;
+    std::string csec;
+    const JVal* sec = findCodeSection(a.doc, csec);
+    uint64_t fileOff = 0;
+    if (sec) {
+        fileOff = jnumOf(sec->get("rawOffset"));
+        if (!fileOff) fileOff = jnumOf(sec->get("offset"));
+        uint64_t raw = jnumOf(sec->get("rawSize"));
+        clen = raw ? raw : jnumOf(sec->get("size"));
+        uint64_t vaddr = jnumOf(sec->get("virtualAddress"));
+        cbase = vaddr ? vaddr : jnumOf(sec->get("addr"));
+        if (a.doc.get("pe")) {
+            uint64_t ib = jnumOf(a.doc.get("pe")->get("imageBase"));
+            if (ib) cbase = ib + vaddr;
+        }
     }
-    if (lines.empty()) s += DIM() + "  no decodable code bytes" + R() + "\n";
-    o(s);
+    if (!clen) clen = d.size() > fileOff ? d.size() - fileOff : 0;
+    if (fileOff >= d.size()) fileOff = 0;
+    if (fileOff + clen > d.size()) clen = d.size() - fileOff;
+    {
+        uint64_t pos = fileOff, end = fileOff + clen;
+        while (pos < end && clines.size() < 200) {
+            AsmInsn in;
+            size_t adv = disasmNext(d.data() + pos, (size_t)(end - pos), cbase + (pos - fileOff), in);
+            if (!adv) adv = 1;
+            AsmLine L;
+            L.addr = cbase + (pos - fileOff);
+            std::string hx;
+            for (size_t i = 0; i < adv && pos + i < end; i++) {
+                if (!hx.empty()) hx += " ";
+                hx += asmHexByte(d[pos + i]);
+            }
+            L.bytes = hx;
+            L.text = in.mnemonic + (in.operands.empty() ? std::string() : (" " + in.operands));
+            L.hasTarget = in.hasTarget;
+            L.target = in.target;
+            L.isCall = in.isCall;
+            L.isJump = in.isJump;
+            clines.push_back(L);
+            pos += adv;
+        }
+    }
+
+    if (!indent && stdoutIsTty()) {
+        renderHuman(a.doc, path, a.ms);
+        o(behaviorHumanText(br));
+        o(asmHumanText(clines, cbase, clen, csec, 60));
+        return 0;
+    }
+    JVal doc = a.doc;
+    {
+        std::string jb;
+        Builder bb(jb);
+        bb.beginObj();
+        writeBehaviorJson(bb, br);
+        bb.endObj();
+        JVal bv;
+        if (jsonParse(jb, bv)) doc.props.push_back({ "behavior", bv });
+    }
+    {
+        std::string jc;
+        Builder bc(jc);
+        bc.beginObj();
+        bc.kv("format", a.doc.get("format")->getStr("label"));
+        bc.kv("section", csec);
+        bc.kv("base", hexU(cbase, 0));
+        bc.kv("bytes", clen);
+        bc.arr("lines");
+        for (const AsmLine& L : clines) {
+            bc.beginObj();
+            bc.kv("addr", hexU(L.addr, 0));
+            bc.kv("bytes", L.bytes);
+            bc.kv("text", L.text);
+            if (L.hasTarget) bc.kv("target", hexU(L.target, 0));
+            if (L.isCall) bc.kv("call", true);
+            if (L.isJump) bc.kv("jump", true);
+            bc.endObj();
+        }
+        bc.endArr();
+        bc.endObj();
+        JVal cv;
+        if (jsonParse(jc, cv)) doc.props.push_back({ "code", cv });
+    }
+    std::string out;
+    Builder bo(out);
+    emitValue(bo, doc);
+    printf("%s\n", indent ? prettyJson(out).c_str() : out.c_str());
     return 0;
 }
 
@@ -918,6 +1064,8 @@ static void printUsage() {
         "  codebreak-cli <file> --json                force raw JSON\n"
         "  codebreak-cli <file> --pretty              indented JSON\n"
         "  codebreak-cli <file> --risk                risk assessment JSON\n"
+        "  codebreak-cli <file> --deep                combined deep analysis\n"
+        "                                             (parse summary + behavior + code)\n"
         "  codebreak-cli <file> --behavior            static host-behavior trace (network,\n"
         "                                             file paths, processes, persistence)\n"
         "  codebreak-cli <file> --asm                 x86-64 disassembly of the code section\n"
@@ -943,6 +1091,7 @@ static void printHelp() {
         "  json <file>          analyze (raw JSON)\n"
         "  risk <file>          risk assessment\n"
         "  behavior <file>      static host-behavior trace\n"
+        "  deep <file>          combined deep analysis (summary+behavior+code)\n"
         "  asm <file>           x86-64 disassembly of code (alias code/disasm)\n"
         "  strings <file> ...   extract strings\n"
         "  hex <file> OFFSET    hex dump\n"
@@ -1015,6 +1164,13 @@ static int runTokens(const std::vector<std::string>& args) {
             if (args[i] == "--indent" || args[i] == "--pretty") bIndent = true;
         return cmdBehavior(args[1], bIndent);
     }
+    if (first == "--deep" || first == "deep" || first == "--full") {
+        if (args.size() < 2) { fprintf(stderr, "usage: deep <file>\n"); return 2; }
+        bool dIndent = false;
+        for (size_t i = 2; i < args.size(); i++)
+            if (args[i] == "--indent" || args[i] == "--pretty") dIndent = true;
+        return cmdDeep(args[1], dIndent);
+    }
     if (first == "-h" || first == "--help" || first == "help") { printUsage(); return 0; }
     if (first == "json") {
         if (args.size() < 2) { fprintf(stderr, "usage: json <file>\n"); return 2; }
@@ -1074,6 +1230,11 @@ static int runTokens(const std::vector<std::string>& args) {
             bool ind = false;
             for (const auto& b2 : args) if (b2 == "--indent" || b2 == "--pretty") ind = true;
             return cmdBehavior(args[0], ind);
+        }
+        if (a == "--deep" || a == "--full") {
+            bool ind = false;
+            for (const auto& b2 : args) if (b2 == "--indent" || b2 == "--pretty") ind = true;
+            return cmdDeep(args[0], ind);
         }
         if (a == "--asm" || a == "--code" || a == "--disasm") {
             uint64_t off = UINT64_MAX, ba = UINT64_MAX, len = UINT64_MAX;
