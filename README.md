@@ -6,12 +6,15 @@ The GUI is a self-contained native Win32 application (common controls only, no b
 
 ## The GUI
 
-Run `CodeBreak.exe`, drop a file anywhere on the window (or press **Open File...**) and the analysis appears in milliseconds. The whole UI is drawn with the native Windows common controls — no embedded browser, no WebView2 runtime to install, nothing extra to ship next to the exe.
+Run `CodeBreak.exe`, drop a file anywhere on the window (or **File → Open File...**) and the analysis appears in milliseconds. The whole UI is drawn with the native Windows common controls in a dark professional theme — no embedded browser, no WebView2 runtime to install, nothing extra to ship next to the exe.
 
-- **Summary bar** — the file name and size, the detected format, the risk band and score (0–100), the number of security indicators and the SHA-256 prefix.
-- **Find box** — type any field name (`sha256`, `risk`, `imports`, `subject`, `version`...) and the tree filters live to matching fields.
-- **Field tree** — the full parsed analysis as a browsable tree: every format section (PE sections/imports/security, ELF, APK manifest/DEX, ZIP entries, OLE2 streams, PKCS #7 signers, ...), hashes, entropy and risk signals.
+- **Header** — the CodeBreak title, an **Open File…** button and a live, color-coded **RISK** badge (green → red by severity).
+- **Summary bar** — the file name and size, the detected format and the number of security indicators.
+- **Find box** — type any field name (`sha256`, `risk`, `imports`, `subject`, `version`...) and the tree filters live to matching fields (`Ctrl+F` focuses it).
+- **Field tree** — the full parsed analysis as a browsable dark tree: every format section (PE sections/imports/security, ELF, APK manifest/DEX, ZIP entries, OLE2 streams, PKCS #7 signers, ...), hashes, entropy and risk signals.
 - **Detail pane** — select any node to inspect its value (a scalar, or a readable summary of an object/array).
+- **Menus** — File (Open, **Export HTML Report…**, Recent files, Exit), Edit (Find, Expand All, Collapse All) and Help (About).
+- **Status bar** — the active file path, its SHA-256 prefix and the analysis time.
 
 Heavy work (file reads, parsing, hashing) runs on a worker thread so the window never blocks; the UI thread only renders and dispatches. Analysis is also accepted on the command line: `CodeBreak.exe somefile.exe`.
 
@@ -48,6 +51,8 @@ codebreak-cli --batch DIR --limit 5000 --max-mb 64
 ```
 
 Exit code 0 on success, 1 on error (message on stderr). All output is UTF-8 JSON, suitable for piping into `jq`. `--report` and the batch `--html` flag write self-contained HTML reports.
+
+Run `codebreak-cli` with **no arguments** to enter an interactive shell where you can type commands such as a bare file path, `risk <file>`, `batch <dir>`, `compare <a> <b>`, `hash <file>` or `gui <file>` — useful when you double-click the exe instead of running it from a terminal.
 
 ## What is parsed
 

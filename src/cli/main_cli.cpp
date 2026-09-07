@@ -54,20 +54,25 @@ static void printUsage() {
         "codebreak-cli <file> [--strings [pattern]] [--min-len N] [--kind all|ascii|wide] [--count N]\n"
         "                 [--hex OFFSET] [--hex-len N] [--indent] [--risk] [--report FILE.html]\n"
         "codebreak-cli --batch DIR [--json FILE.json] [--html FILE.html] [--csv FILE.csv]\n"
-        "                              [--limit N] [--max-mb N]\n");
+        "                              [--limit N] [--max-mb N]\n"
+        "codebreak-cli --hash <file> | --compare <a> <b> | -h\n"
+        "\n"
+        "Run without arguments for an interactive shell where you can type these commands.\n");
 }
 
-static void holdWindowIfOwnConsole() {
-#ifdef _WIN32
-    DWORD pids[2];
-    DWORD cnt = GetConsoleProcessList(pids, 2);
-    if (cnt <= 1) {
-        fprintf(stderr, "\nPress Enter to exit...");
-        fflush(stderr);
-        int c;
-        while ((c = getchar()) != '\n' && c != EOF) {}
+static std::vector<std::string> splitArgs(const std::string& line) {
+    std::vector<std::string> out;
+    std::string cur;
+    bool inq = false;
+    for (char ch : line) {
+        if (ch == '"') { inq = !inq; continue; }
+        if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
+            if (!inq && !cur.empty()) { out.push_back(cur); cur.clear(); }
+            else if (inq) cur += ch;
+        } else cur += ch;
     }
-#endif
+    if (!cur.empty()) out.push_back(cur);
+    return out;
 }
 
 static std::string prettyJson(const std::string& j) {
@@ -218,17 +223,13 @@ static int runBatch(const std::string& dir, const std::string& jsonPath,
     auto t1 = std::chrono::steady_clock::now();
     double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
+    std::string out = full;
+    char mb[48];
+    snprintf(mb, sizeof(mb), ", \"durationMs\": %.1f", ms);
+    out.insert(out.size() - 1, mb);
     if (jsonPath.empty()) {
-        std::string out = full;
-        char mb[48];
-        snprintf(mb, sizeof(mb), ", \"durationMs\": %.1f", ms);
-        out.insert(out.size() - 1, mb);
         printf("%s\n", out.c_str());
     } else {
-        std::string out = full;
-        char mb[48];
-        snprintf(mb, sizeof(mb), ", \"durationMs\": %.1f", ms);
-        out.insert(out.size() - 1, mb);
         if (!writeFileUtf8(jsonPath, out, err)) { fprintf(stderr, "error: %s\n", err.c_str()); return 1; }
         printf("wrote %s (%zu files)\n", jsonPath.c_str(), items.size());
     }
@@ -252,21 +253,53 @@ static int runBatch(const std::string& dir, const std::string& jsonPath,
     return 0;
 }
 
-int main(int argc, char** argv) {
-    if (argc < 2) {
-        printUsage();
-        fprintf(stderr,
-            "\nUsage: give it a file path or use --batch / --compare / --hash.\n"
-            "Example:  codebreak-cli somefile.exe\n");
-        holdWindowIfOwnConsole();
-        return 2;
+static int runBatchCmd(const std::vector<std::string>& args, size_t offset) {
+    if (args.size() < offset + 1) { printUsage(); return 2; }
+    std::string dir = args[offset];
+    std::string jsonPath, htmlPath, csvPath;
+    size_t limit = (size_t)100000;
+    uint64_t maxMb = 0;
+    for (size_t i = offset + 1; i < args.size(); i++) {
+        std::string a = args[i];
+        if ((a == "--json" || a == "--html" || a == "--csv") && i + 1 < args.size()) {
+            std::string val = args[++i];
+            if (a == "--json") jsonPath = val;
+            else if (a == "--html") htmlPath = val;
+            else csvPath = val;
+        } else if (a == "--limit" && i + 1 < args.size()) limit = (size_t)strtoul(args[++i].c_str(), nullptr, 10);
+        else if (a == "--max-mb" && i + 1 < args.size()) maxMb = (uint64_t)strtoull(args[++i].c_str(), nullptr, 10);
+        else { fprintf(stderr, "unknown arg: %s\n", a.c_str()); printUsage(); return 2; }
     }
-    std::string first = argv[1];
+    return runBatch(dir, jsonPath, htmlPath, csvPath, limit, maxMb ? maxMb * 1024ull * 1024ull : 0);
+}
+
+#ifdef _WIN32
+static int launchGui(const std::string& file) {
+    HINSTANCE r = ShellExecuteW(nullptr, L"open", L"CodeBreak.exe",
+                                file.empty() ? nullptr : utf8ToWide(file).c_str(),
+                                nullptr, SW_SHOWNORMAL);
+    if ((INT_PTR)r <= 32) {
+        fprintf(stderr, "gui: failed to launch CodeBreak.exe (%lld). Is it next to this CLI?\n", (long long)(INT_PTR)r);
+        return 1;
+    }
+    return 0;
+}
+#endif
+
+static int analyzeFileFull(const std::string& path, bool indent, bool riskOnly) {
+    return analyzeOne(path, indent, riskOnly);
+}
+
+static void printInteractiveBanner();
+
+static int runCommand(const std::vector<std::string>& args) {
+    if (args.empty()) { printUsage(); return 2; }
+    std::string first = args[0];
+
     if (first == "--compare" || first == "-c") {
-        if (argc < 4) { printUsage(); return 2; }
+        if (args.size() < 3) { printUsage(); return 2; }
         bool indent = false;
-        std::string a = argv[2], bpath = argv[3];
-        for (int i = 4; i < argc; i++) if (std::string(argv[i]) == "--indent") indent = true;
+        for (size_t i = 3; i < args.size(); i++) if (args[i] == "--indent") indent = true;
         auto analyze1 = [&](const std::string& p, JVal& doc, double& ms) -> bool {
             std::vector<uint8_t> d; std::string e;
             if (!readFileBytes(p, d, e)) { fprintf(stderr, "error %s: %s\n", p.c_str(), e.c_str()); return false; }
@@ -279,7 +312,7 @@ int main(int argc, char** argv) {
         };
         JVal da, db;
         double ma = 0, mb = 0;
-        if (!analyze1(a, da, ma) || !analyze1(bpath, db, mb)) return 1;
+        if (!analyze1(args[1], da, ma) || !analyze1(args[2], db, mb)) return 1;
         const JVal* ha = da.get("hashes");
         const JVal* hb = db.get("hashes");
         const JVal* fa = da.get("format");
@@ -322,36 +355,23 @@ int main(int argc, char** argv) {
     }
 
     if (first == "--hash") {
-        if (argc < 3) { printUsage(); return 2; }
+        if (args.size() < 2) { printUsage(); return 2; }
         std::vector<uint8_t> d; std::string e;
-        if (!readFileBytes(argv[2], d, e)) { fprintf(stderr, "error: %s\n", e.c_str()); return 1; }
-        FileInfo fi = queryFileInfo(argv[2]);
-        AnalysisOutput ao = analyzeFile(d.data(), d.size(), argv[2], fi);
-        std::string j = ao.json;
-        printf("%s\n", j.c_str());
+        if (!readFileBytes(args[1], d, e)) { fprintf(stderr, "error: %s\n", e.c_str()); return 1; }
+        FileInfo fi = queryFileInfo(args[1]);
+        AnalysisOutput ao = analyzeFile(d.data(), d.size(), args[1], fi);
+        printf("%s\n", ao.json.c_str());
         return 0;
     }
 
-    if (first == "--batch" || first == "-b") {
-        if (argc < 3) { printUsage(); return 2; }
-        std::string dir = argv[2];
-        std::string jsonPath, htmlPath, csvPath;
-        size_t limit = (size_t)100000;
-        uint64_t maxMb = 0;
-        for (int i = 3; i < argc; i++) {
-            std::string a = argv[i];
-            if ((a == "--json" || a == "--html" || a == "--csv") && i + 1 < argc) {
-                std::string val = argv[++i];
-                if (a == "--json") jsonPath = val;
-                else if (a == "--html") htmlPath = val;
-                else csvPath = val;
-            } else if (a == "--limit" && i + 1 < argc) limit = (size_t)strtoul(argv[++i], nullptr, 10);
-            else if (a == "--max-mb" && i + 1 < argc) maxMb = (uint64_t)strtoull(argv[++i], nullptr, 10);
-            else { fprintf(stderr, "unknown arg: %s\n", a.c_str()); printUsage(); return 2; }
-        }
-        return runBatch(dir, jsonPath, htmlPath, csvPath, limit, maxMb ? maxMb * 1024ull * 1024ull : 0);
+    if (first == "--batch" || first == "-b") return runBatchCmd(args, 1);
+    if (first == "--gui") {
+#ifdef _WIN32
+        return launchGui(args.size() > 1 ? args[1] : "");
+#else
+        fprintf(stderr, "gui: only available on Windows\n"); return 1;
+#endif
     }
-
     if (first == "-h" || first == "--help") { printUsage(); return 0; }
 
     std::string path = first;
@@ -367,17 +387,17 @@ int main(int argc, char** argv) {
     uint64_t hexOff = 0;
     uint64_t hexLen = 256;
 
-    for (int i = 2; i < argc; i++) {
-        std::string a = argv[i];
-        if (a == "--strings") { stringsMode = true; if (i + 1 < argc && argv[i + 1][0] != '-') stringsPattern = argv[++i]; }
-        else if (a == "--min-len" && i + 1 < argc) minLen = (uint32_t)strtoul(argv[++i], nullptr, 0);
-        else if (a == "--kind" && i + 1 < argc) { std::string k = argv[++i]; kind = k == "ascii" ? 1 : k == "wide" ? 2 : 0; }
-        else if (a == "--count" && i + 1 < argc) count = (uint32_t)strtoul(argv[++i], nullptr, 0);
-        else if (a == "--hex" && i + 1 < argc) { hexMode = true; hexOff = strtoull(argv[++i], nullptr, 0); }
-        else if (a == "--hex-len" && i + 1 < argc) hexLen = strtoull(argv[++i], nullptr, 0);
+    for (size_t i = 1; i < args.size(); i++) {
+        std::string a = args[i];
+        if (a == "--strings") { stringsMode = true; if (i + 1 < args.size() && args[i + 1][0] != '-') stringsPattern = args[++i]; }
+        else if (a == "--min-len" && i + 1 < args.size()) minLen = (uint32_t)strtoul(args[++i].c_str(), nullptr, 0);
+        else if (a == "--kind" && i + 1 < args.size()) { std::string k = args[++i]; kind = k == "ascii" ? 1 : k == "wide" ? 2 : 0; }
+        else if (a == "--count" && i + 1 < args.size()) count = (uint32_t)strtoul(args[++i].c_str(), nullptr, 0);
+        else if (a == "--hex" && i + 1 < args.size()) { hexMode = true; hexOff = strtoull(args[++i].c_str(), nullptr, 0); }
+        else if (a == "--hex-len" && i + 1 < args.size()) hexLen = strtoull(args[++i].c_str(), nullptr, 0);
         else if (a == "--indent") indent = true;
         else if (a == "--risk") riskOnly = true;
-        else if (a == "--report" && i + 1 < argc) reportPath = argv[++i];
+        else if (a == "--report" && i + 1 < args.size()) reportPath = args[++i];
         else { fprintf(stderr, "unknown arg: %s\n", a.c_str()); printUsage(); return 2; }
     }
 
@@ -416,7 +436,7 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    int rc = analyzeOne(path, indent, riskOnly);
+    int rc = analyzeFileFull(path, indent, riskOnly);
     if (rc) return rc;
     if (!reportPath.empty()) {
         std::vector<uint8_t> rd;
@@ -429,4 +449,82 @@ int main(int argc, char** argv) {
         fprintf(stderr, "report written: %s\n", reportPath.c_str());
     }
     return 0;
+}
+
+static void runInteractive() {
+    printInteractiveBanner();
+    fprintf(stdout, "Type a command, then press Enter. Try 'help' or just a file path.\n\n");
+    for (;;) {
+        fprintf(stdout, "codebreak> ");
+        fflush(stdout);
+        std::string line;
+        int c;
+        bool any = false;
+        while ((c = getchar()) != EOF && c != '\n') { line += (char)c; any = true; }
+        if (!any && c == EOF) { fprintf(stdout, "\n"); break; }
+        std::vector<std::string> t = splitArgs(line);
+        if (t.empty()) continue;
+        std::string cmd = t[0];
+        for (size_t i = 0; i < cmd.size(); i++)
+            if (cmd[i] >= 'A' && cmd[i] <= 'Z') cmd[i] = (char)(cmd[i] + 32);
+        if (cmd == "exit" || cmd == "quit" || cmd == "q") break;
+        if (cmd == "help" || cmd == "h" || cmd == "?") { printInteractiveBanner(); continue; }
+
+        std::vector<std::string> out;
+        if (cmd == "analyze" || cmd == "open") {
+            out.assign(t.begin() + 1, t.end());
+        } else if (cmd == "risk") {
+            if (t.size() < 2) { fprintf(stderr, "usage: risk <file>\n"); continue; }
+            out.assign(t.begin() + 1, t.end());
+            out.push_back("--risk");
+        } else if (cmd == "batch") {
+            out.push_back("--batch");
+            out.insert(out.end(), t.begin() + 1, t.end());
+        } else if (cmd == "compare") {
+            out.push_back("--compare");
+            out.insert(out.end(), t.begin() + 1, t.end());
+        } else if (cmd == "hash") {
+            out.push_back("--hash");
+            out.insert(out.end(), t.begin() + 1, t.end());
+        } else if (cmd == "gui") {
+            out.push_back("--gui");
+            out.insert(out.end(), t.begin() + 1, t.end());
+        } else {
+            out = t;
+        }
+        runCommand(out);
+        fprintf(stdout, "\n");
+    }
+}
+
+static void printInteractiveBanner() {
+    fprintf(stdout,
+        "  CodeBreak - interactive analysis shell\n"
+        "  ---------------------------------------------\n"
+        "  <file>               analyze a file (full JSON)\n"
+        "  analyze <file>       same as above\n"
+        "  risk <file>          risk assessment only\n"
+        "  batch <dir>          scan a directory tree\n"
+        "  compare <a> <b>      compare two files\n"
+        "  hash <file>          analysis JSON for a file\n"
+        "  gui <file>           open a file in the GUI (Windows)\n"
+        "  help / exit          show this help / leave the shell\n"
+        "\n");
+}
+
+int main(int argc, char** argv) {
+    if (argc < 2) {
+#ifdef _WIN32
+        DWORD pids[2];
+        DWORD cnt = GetConsoleProcessList(pids, 2);
+        if (cnt <= 1) {
+            runInteractive();
+            return 0;
+        }
+#endif
+        runInteractive();
+        return 0;
+    }
+    std::vector<std::string> args(argv + 1, argv + argc);
+    return runCommand(args);
 }
