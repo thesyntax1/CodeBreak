@@ -52,10 +52,7 @@ if(CB_BUILD_GUI)
         src/host/app.rc
     )
     target_link_libraries(CodeBreak PRIVATE cb_core)
-    target_include_directories(CodeBreak PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/host
-    )
+    target_include_directories(CodeBreak PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/host)
     if(MSVC)
         target_compile_options(CodeBreak PRIVATE /W4 /utf-8 /permissive- /wd4150)
         target_link_options(CodeBreak PRIVATE /SUBSYSTEM:WINDOWS /MANIFEST:NO)
@@ -64,22 +61,6 @@ if(CB_BUILD_GUI)
         target_compile_options(CodeBreak PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-unknown-pragmas)
         target_link_options(CodeBreak PRIVATE -municode -mwindows)
     endif()
-    target_link_libraries(CodeBreak PRIVATE user32 gdi32 shell32 ole32 oleaut32 comdlg32 dwmapi advapi32 shlwapi)
-
-    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-        set(WV2_ARCH_DIR win-x64)
-    else()
-        set(WV2_ARCH_DIR win-x86)
-    endif()
-    set(WV2_LOADER ${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/runtimes/${WV2_ARCH_DIR}/WebView2Loader.dll)
-    if(EXISTS "${WV2_LOADER}")
-        add_custom_command(TARGET CodeBreak POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${WV2_LOADER}" "$<TARGET_FILE_DIR:CodeBreak>"
-            COMMENT "Copying WebView2Loader.dll"
-        )
-        install(TARGETS CodeBreak BUNDLE DESTINATION . RUNTIME DESTINATION .)
-        install(FILES "${WV2_LOADER}" DESTINATION .)
-    else()
-        message(WARNING "WebView2Loader.dll for ${WV2_ARCH_DIR} not found at ${WV2_LOADER}")
-    endif()
+    target_link_libraries(CodeBreak PRIVATE comctl32 user32 gdi32 shell32 ole32 oleaut32 comdlg32 dwmapi advapi32 shlwapi)
+    install(TARGETS CodeBreak BUNDLE DESTINATION . RUNTIME DESTINATION .)
 endif()

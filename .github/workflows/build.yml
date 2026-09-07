@@ -30,7 +30,6 @@ jobs:
           path: |
             build/Release/CodeBreak.exe
             build/Release/codebreak-cli.exe
-            build/Release/WebView2Loader.dll
           if-no-files-found: error
 
   linux-cli-and-tests:

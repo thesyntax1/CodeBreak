@@ -2,18 +2,18 @@
 
 A native binary analysis suite for Windows. CodeBreak loads compiled files — EXE, DLL, APK, JAR, DEX, ELF, Mach-O, Java classes, GZIP/TAR archives, PDF documents, ZIP — and shows what is actually inside them: machine-code structure, metadata, hashes, entropy, strings, and raw bytes. On top of that it runs a transparent **heuristic risk-scoring engine** that turns the parsed facts into a 0–100 threat score. Nothing is guessed or faked; every field is parsed from the file itself.
 
-The GUI is a native Win32 application hosting Microsoft Edge WebView2. The parsing engine is dependency-free C++17 and also builds as a standalone CLI on Linux and Windows.
+The GUI is a self-contained native Win32 application (common controls only, no browser component and no runtime dependency). The parsing engine is dependency-free C++17 and also builds as a standalone CLI on Linux and Windows.
 
 ## The GUI
 
-Run `CodeBreak.exe`, drop a file anywhere on the window (or press `Ctrl+O`) and the analysis appears in milliseconds: a full parse of `/bin/ls` takes ~4 ms, and a 2.2 MB `libc.so.6` — 17,299 extracted strings included — analyzes in ~45 ms. Files up to 4 GB load through a memory-mapped pipeline.
+Run `CodeBreak.exe`, drop a file anywhere on the window (or press **Open File...**) and the analysis appears in milliseconds. The whole UI is drawn with the native Windows common controls — no embedded browser, no WebView2 runtime to install, nothing extra to ship next to the exe.
 
-- **Overview** — file identity, format detection with confidence, SHA-256/SHA-1/MD5/CRC32, overall and per-16-KB entropy graph, a live security-indicator list, and a one-glance risk score.
-- **Risk** — the heuristic threat score rendered as a gauge (0–100, clean → critical), the weighted signal groups that produced it, and the highest-confidence findings.
-- **PE / APK / ZIP / ELF / Mach-O / Java class / GZIP / TAR / PDF / OLE2 / Signature tabs** — appear only when the format is present: imports and exports, rich header history, debug PDB paths, version info, TLS, Authenticode state; Android manifest (decoded from binary AXML), permissions, activities, services, DEX class map, signing schemes, native libraries; full archive trees, APK v2/v3 signature blocks; ELF sections/segments/interpreter/dynamic imports; Mach-O load commands; constant pool, fields and methods for `.class` files; gzip member metadata, POSIX tar member tables, PDF version/objects/streams/encryption/JavaScript presence; the OLE2 compound-file storage/stream tree with the container kind (Word/Excel/PowerPoint/Visio etc.); the PKCS #7 signer view listing each signing certificate's subject, issuer, serial, validity and SHA-1 thumbprint.
-- **Report** — a **Report** button in the toolbar exports a fully self-contained HTML report (no internet needed) capturing the summary, risk assessment, findings, hashes and the entire analysis tree.
-- **Strings** — virtualized list over up to 2 million extracted strings, ASCII + UTF-16 wide detection, live filter box, minimum-length control, jump-to-offset.
-- **Hex** — responsive hex viewer with offset jumping synced from the strings tab.
+- **Summary bar** — the file name and size, the detected format, the risk band and score (0–100), the number of security indicators and the SHA-256 prefix.
+- **Find box** — type any field name (`sha256`, `risk`, `imports`, `subject`, `version`...) and the tree filters live to matching fields.
+- **Field tree** — the full parsed analysis as a browsable tree: every format section (PE sections/imports/security, ELF, APK manifest/DEX, ZIP entries, OLE2 streams, PKCS #7 signers, ...), hashes, entropy and risk signals.
+- **Detail pane** — select any node to inspect its value (a scalar, or a readable summary of an object/array).
+
+Heavy work (file reads, parsing, hashing) runs on a worker thread so the window never blocks; the UI thread only renders and dispatches. Analysis is also accepted on the command line: `CodeBreak.exe somefile.exe`.
 
 ## Risk & threat model
 
@@ -79,7 +79,7 @@ Requirements: Visual Studio 2022 with the *Desktop development with C++* workloa
 build.bat
 ```
 
-Output: `build\Release\CodeBreak.exe` and `build\Release\codebreak-cli.exe`. `WebView2Loader.dll` is copied next to the executable automatically. The WebView2 headers and loader in `third_party/webview2` are from the official `Microsoft.Web.WebView2` 1.0.2651.64 package, so no NuGet step is needed. Running the app requires the Edge WebView2 Runtime, which is preinstalled on Windows 11 and current Windows 10; the app tells you where to get it if it is missing.
+Output: `build\Release\CodeBreak.exe` and `build\Release\codebreak-cli.exe`. Both are self-contained; the GUI uses only the standard Windows common controls and needs no extra DLLs or runtime to be installed.
 
 Equivalent manual commands:
 
@@ -113,18 +113,17 @@ src/
                    recursive directory walk (batch scans)
   jsonw.h jsonr.h  minimal JSON writer (engine) and parser (host)
   cli/main_cli.cpp command line front end (single-file, risk, report, batch)
-  host/main.cpp    Win32 + WebView2 application host
-  host/app.html    the entire UI (single file, no external assets)
+  host/main.cpp    native Win32 GUI (tree + find + detail, no browser)
+  host/app.rc      application icon, version info and manifest
 tests/
   run_tests.py     assertion suite; checks real parser output
-third_party/webview2  official WebView2 SDK headers + loader (1.0.2651.64)
 tools/make_fixtures.py  builds PE, APK, DEX, ELF, Mach-O, class, ZIP, GZIP,
                         TAR, PDF, OLE2 (.doc) and PKCS #7 fixtures from scratch
 tools/cfbwriter.py      minimal OLE2 compound-file writer used by make_fixtures.py
 tools/make_icon.py       regenerates the application icon
 ```
 
-The host and the UI talk over `window.chrome.webview.postMessage` with request/response envelopes (`{id, cmd, ...}` in, `{id, ok, data|error}` out). Heavy work (file reads, parsing, string indexing, HTML report export) runs on worker threads so the window never blocks; the UI thread only renders and dispatches.
+Heavy work (file reads, parsing, hashing) runs on a worker thread that posts its result back to the UI thread; the UI thread only renders and dispatches.
 
 To regenerate the application icon after editing `tools/make_icon.py`, run `python tools/make_icon.py` and rebuild.
 
@@ -132,7 +131,7 @@ To regenerate the application icon after editing `tools/make_icon.py`, run `pyth
 
 `.github/workflows/build.yml` runs on every push, pull request and on demand (Actions -> `build` -> Run workflow). It has two jobs:
 
-- **Windows x64 (MSVC)** — configures `-A x64` and builds the full release, then uploads an artifact named `codebreak-windows-x64` containing `CodeBreak.exe`, `codebreak-cli.exe` and the WebView2 runtime loader (`WebView2Loader.dll`) so the GUI runs on any Windows machine with the WebView2 Runtime.
+- **Windows x64 (MSVC)** — configures `-A x64` and builds the full release, then uploads a self-contained `codebreak-windows-x64` artifact containing `CodeBreak.exe` and `codebreak-cli.exe`.
 - **Linux CLI + tests** — builds `codebreak-cli` with the GUI disabled, regenerates every fixture and runs the full `tests/run_tests.py` suite, then uploads the `codebreak-linux-cli` artifact.
 
 Grab the built exe from the workflow's **Artifacts** panel on the Actions tab (a workflow run must finish first; push a tag `v*` or click *Run workflow* to trigger a build).
@@ -148,4 +147,4 @@ The suite builds a real PE image (sections, imports, exports, rich header, debug
 
 ## License
 
-MIT. WebView2 SDK components under `third_party/webview2` follow the Microsoft WebView2 Runtime license (see `LICENSE.txt` / `NOTICE.txt` there).
+MIT.

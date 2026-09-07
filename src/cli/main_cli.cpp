@@ -11,6 +11,9 @@
 #include <string>
 #include <vector>
 #include <chrono>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 using namespace cb;
 
@@ -52,6 +55,19 @@ static void printUsage() {
         "                 [--hex OFFSET] [--hex-len N] [--indent] [--risk] [--report FILE.html]\n"
         "codebreak-cli --batch DIR [--json FILE.json] [--html FILE.html] [--csv FILE.csv]\n"
         "                              [--limit N] [--max-mb N]\n");
+}
+
+static void holdWindowIfOwnConsole() {
+#ifdef _WIN32
+    DWORD pids[2];
+    DWORD cnt = GetConsoleProcessList(pids, 2);
+    if (cnt <= 1) {
+        fprintf(stderr, "\nPress Enter to exit...");
+        fflush(stderr);
+        int c;
+        while ((c = getchar()) != '\n' && c != EOF) {}
+    }
+#endif
 }
 
 static std::string prettyJson(const std::string& j) {
@@ -237,7 +253,14 @@ static int runBatch(const std::string& dir, const std::string& jsonPath,
 }
 
 int main(int argc, char** argv) {
-    if (argc < 2) { printUsage(); return 2; }
+    if (argc < 2) {
+        printUsage();
+        fprintf(stderr,
+            "\nUsage: give it a file path or use --batch / --compare / --hash.\n"
+            "Example:  codebreak-cli somefile.exe\n");
+        holdWindowIfOwnConsole();
+        return 2;
+    }
     std::string first = argv[1];
     if (first == "--compare" || first == "-c") {
         if (argc < 4) { printUsage(); return 2; }

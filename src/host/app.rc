@@ -1,9 +1,6 @@
 #include <windows.h>
 
-#define IDR_APP_HTML 101
 #define IDI_APPICON  102
-
-IDR_APP_HTML RCDATA "app.html"
 
 IDI_APPICON ICON "app.ico"
 
