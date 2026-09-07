@@ -4,6 +4,8 @@ A native binary analysis suite that runs entirely in the terminal. CodeBreak loa
 
 The parsing engine is a single dependency-free C++17 codebase (`cb_core`) with one front end: `codebreak-cli`, a terminal-only command line tool that builds on Linux and Windows.
 
+> **Ready-to-run builds** — precompiled binaries for Windows and Linux are published under the **Releases** tab on GitHub (one binary per release, no install needed). See [Releases](https://github.com/thesyntax1/CodeBreak/releases).
+
 ## Risk & threat model
 
 Every analysis ends with a `risk` node computed by `src/risk.cpp`. The engine is intentionally *transparent*: a set of weighted signal groups, each reporting its category, weight and hit count, sum to a score capped at 100.
@@ -191,6 +193,8 @@ tools/cfbwriter.py      minimal OLE2 compound-file writer used by make_fixtures.
 
 Grab the built exe from the workflow's **Artifacts** panel on the Actions tab (a workflow run must finish first; push a tag `v*` or click *Run workflow* to trigger a build).
 
+Official, easy-to-install builds are attached to each **release**: every tagged release ships `codebreak-cli.exe` (Windows x64) and a Linux CLI build as release assets on the GitHub **Releases** page.
+
 ## Testing
 
 ```sh
@@ -199,6 +203,15 @@ CB_CLI=build-cli/codebreak-cli python3 tests/run_tests.py
 ```
 
 The suite builds a real PE image (sections, imports, exports, rich header, debug directory, TLS, version info, certificate table), a real signed APK (ZIP + binary AXML manifest + DEX with valid SHA-1/Adler-32 + v1/v2 signature blocks), an ELF shared object, a Mach-O image, a Java class, a macro-bearing OLE2 `.doc` and an OpenSSL PKCS #7 signature, plus GZIP, TAR and PDF fixtures — then asserts dozens of parsed fields against known ground truth (including that the new parsers and the risk engine are present in the output) and checksum-validating runs against system binaries.
+
+## Developer & contact
+
+CodeBreak is developed by a single developer. Questions, feedback, feature ideas and bug reports are welcome:
+
+- **TikTok** — [@szoboszlai2113](https://www.tiktok.com/@szoboszlai2113)
+- **E-mail** — [user2102392109@proton.me](mailto:user2102392109@proton.me)
+
+If you have a file that CodeBreak mis-parses or crashes on, or a suggestion for a new parser or analysis view, reach out — screenshots and sample files (anonymized if needed) make it easiest to help.
 
 ## License
 
