@@ -138,7 +138,8 @@ bool axmlParse(const uint8_t* d, size_t n, AxmlNode& root, std::string& errOut) 
         } else if (type == 0x0102) {
             Rd x(d, n, r.o);
             x.u32(); x.u32();
-            uint32_t nsIdx = x.u32(), nameIdx = x.u32();
+            x.u32();
+            uint32_t nameIdx = x.u32();
             x.u16();
             x.u16();
             uint16_t attrCount = x.u16();

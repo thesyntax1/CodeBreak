@@ -67,7 +67,9 @@ ZipData zipParse(const uint8_t* d, size_t n, Builder& b, IndCollector& inds) {
         if (d[i] == 'P' && d[i + 1] == 'K' && d[i + 2] == 5 && d[i + 3] == 6) { eocd = (int64_t)i; break; }
     }
     if (eocd < 0) {
+        b.beginObj();
         b.kv("error", "end of central directory not found");
+        b.endObj();
         return z;
     }
     z.eocdOffset = (uint64_t)eocd;
@@ -83,7 +85,7 @@ ZipData zipParse(const uint8_t* d, size_t n, Builder& b, IndCollector& inds) {
     uint64_t cdOff = cdOff32;
     if (commentLen && (size_t)eocd + 22 + commentLen <= n)
         z.comment = utf8Sanitize(d + eocd + 22, commentLen);
-    if (er.err) { b.kv("error", "truncated EOCD"); return z; }
+    if (er.err) { b.beginObj(); b.kv("error", "truncated EOCD"); b.endObj(); return z; }
 
     if (entriesTotal16 == 0xFFFF || cdOff32 == 0xFFFFFFFF || cdSize32 == 0xFFFFFFFF || entriesDisk == 0xFFFF) {
         int64_t loc = eocd - 20;
@@ -116,7 +118,9 @@ ZipData zipParse(const uint8_t* d, size_t n, Builder& b, IndCollector& inds) {
     z.cdSize = cdSize;
 
     if (cdOff + cdSize > n) {
+        b.beginObj();
         b.kv("error", "central directory out of bounds (file may be truncated)");
+        b.endObj();
         return z;
     }
 
@@ -158,7 +162,7 @@ ZipData zipParse(const uint8_t* d, size_t n, Builder& b, IndCollector& inds) {
         uint32_t sig = cr.u32();
         if (sig != 0x02014B50) { break; }
         cr.u16(); cr.u16();
-        uint16_t flags = cr.u16();
+        cr.u16();
         uint16_t method = cr.u16();
         cr.u16(); cr.u16();
         uint32_t crcv = cr.u32();
@@ -189,7 +193,7 @@ ZipData zipParse(const uint8_t* d, size_t n, Builder& b, IndCollector& inds) {
             if (ex && extraLen >= 20) {
                 Rd xr(ex, extraLen);
                 uint16_t hid = xr.u16();
-                uint16_t hsz = xr.u16();
+                xr.u16();
                 if (hid == 0x0001) {
                     uint64_t uh = xr.u64();
                     uint64_t uc = xr.u64();

@@ -43,8 +43,6 @@ static std::string DIM() { return g_color ? esc(2) : ""; }
 static std::string RED() { return g_color ? esc(31) : ""; }
 static std::string GRN() { return g_color ? esc(32) : ""; }
 static std::string YEL() { return g_color ? esc(33) : ""; }
-static std::string BLU() { return g_color ? esc(34) : ""; }
-static std::string MAG() { return g_color ? esc(35) : ""; }
 static std::string CYN() { return g_color ? esc(36) : ""; }
 static std::string WHT() { return g_color ? esc(37) : ""; }
 static std::string REDB() { return g_color ? esc(41) : ""; }

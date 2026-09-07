@@ -52,7 +52,7 @@ void dexParse(const uint8_t* d, size_t n, const char* entryName, Builder& b, Ind
     uint32_t typCount = h.u32(), typOff = h.u32();
     uint32_t proCount = h.u32(); h.u32();
     uint32_t fldCount = h.u32(); h.u32();
-    uint32_t mthCount = h.u32(), mthOff = h.u32();
+    uint32_t mthCount = h.u32(); h.u32();
     uint32_t clsCount = h.u32(), clsOff = h.u32();
     h.u32(); h.u32();
     b.kv("fileSize", (uint64_t)fileSize);

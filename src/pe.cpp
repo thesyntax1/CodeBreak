@@ -1059,8 +1059,15 @@ PeSummary peParse(const uint8_t* d, size_t n, Builder& b) {
             I.push_back({ 2, "No import directory", "The file declares no imports despite being a native executable (typical of heavily packed malware)" });
         if (impTotal > 0 && impTotal < 6 && !c.sum.dotnet)
             I.push_back({ 1, "Unusually small import table", "Only " + decU(impTotal) + " imported function(s); many packers reduce imports to LoadLibrary/GetProcAddress" });
-        if (!c.sum.signed_) I.push_back({ 0, "Not digitally signed", "No Authenticode certificate table present" });
-        else I.push_back({ 0, "Digitally signed", "Certificate table present (" + fmtSize(c.dirs[4][1]) + ")" });
+        bool haveSigner = false;
+        for (const auto& ind : c.sum.inds)
+            if (icontains(ind.title, "authenticode")) { haveSigner = true; break; }
+        if (!c.sum.signed_)
+            I.push_back({ 0, "Not digitally signed", "No Authenticode certificate table present" });
+        else if (haveSigner)
+            I.push_back({ 0, "Digitally signed", "Authenticode signer parsed (" + fmtSize(c.dirs[4][1]) + " certificate table)" });
+        else
+            I.push_back({ 0, "Certificate table present", "Signature/certificate table found but no signer was parsed (" + fmtSize(c.dirs[4][1]) + ")" });
         if (ts == 0) I.push_back({ 0, "Zero compile timestamp", "Header timestamp was zeroed (reproducible builds or anti-forensics)" });
         else if ((uint64_t)ts > 4102444800ull) I.push_back({ 1, "Implausible compile timestamp", fmtTimeUtc(ts) + " is in the future" });
         if (checksum != 0 && checksum != computedChecksum) I.push_back({ 0, "PE checksum mismatch", "Stored " + hexU(checksum, 8) + " != computed " + hexU(computedChecksum, 8) + " (modified after link or intentional)" });

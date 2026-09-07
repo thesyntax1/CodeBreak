@@ -113,7 +113,7 @@ void elfParse(const uint8_t* d, size_t n, Builder& b, IndCollector& inds) {
     ident.skip(4);
     uint8_t eiClass = ident.u8();
     uint8_t eiData = ident.u8();
-    uint8_t eiVersion = ident.u8();
+    ident.u8();
     uint8_t eiOsabi = ident.u8();
     ident.u8();
     bool is64 = eiClass == 2;

@@ -164,13 +164,9 @@ bool parseCertificate(Region cert, ParsedCert& pc) {
     pc.der = std::move(full);
     Der body(seq);
     Region r;
-    uint8_t t;
-    // version [0] optional then serialNumber 0x02
-    if (body.next(r, t) && t == 0xA0) {
-        // skip version, serial follows
-    } else {
-        // r is actually the serial INTEGER (tag was read, t==0x02)
-    }
+    uint8_t t = 0;
+    // optional [0] EXPLICIT version, then the serial INTEGER (0x02)
+    if (!body.next(r, t)) return false;
     if (t == 0xA0) {
         if (!body.next(r, t) || t != 0x02) return false;
     } else if (t != 0x02) {

@@ -173,6 +173,7 @@ def main():
     if expected_tp:
         check("pe signer thumbprint", sc["signer"]["thumbprintSha1"].lower() == expected_tp)
     check("pe signer indicator", any("Authenticode signer" in i["title"] for i in sx["indicators"]))
+    check("signed exe not flagged unsigned", all("Unsigned" not in s["title"] for s in sx["risk"]["signals"]))
 
     r = subprocess.run([CLI, "--compare", os.path.join(FIX, "fixture_pe.exe"), os.path.join(FIX, "fixture_pe.exe")], capture_output=True)
     cmp2 = json.loads(r.stdout)
@@ -230,6 +231,36 @@ def main():
     r = subprocess.run([CLI, os.path.join(FIX, "fixture_elf64"), "--calls", "--dot"], capture_output=True)
     dot = r.stdout.decode()
     check("graph dot", dot.startswith("digraph callgraph") and "->" in dot)
+
+    # Regression: an unsigned PE must actually be flagged "Unsigned portable executable"
+    # (the old code self-suppressed it because the "Not digitally signed" note contains "signed").
+    import struct
+    pe_bytes = bytearray(open(os.path.join(FIX, "fixture_pe.exe"), "rb").read())
+    peoff = struct.unpack_from("<I", pe_bytes, 0x3C)[0]
+    opt = peoff + 24
+    magic = struct.unpack_from("<H", pe_bytes, opt)[0]
+    dd = opt + (112 if magic == 0x20B else 96)
+    struct.pack_into("<II", pe_bytes, dd + 4 * 8, 0, 0)  # zero the Security certificate data directory
+    tmp = os.path.join(FIX, "_unsigned_test.exe")
+    open(tmp, "wb").write(pe_bytes)
+    try:
+        r = subprocess.run([CLI, tmp, "--json"], capture_output=True)
+        uj = json.loads(r.stdout)
+        uns = [s["title"] for s in uj["risk"]["signals"]]
+        check("unsigned exe flagged", "Unsigned portable executable" in uns, str(uns))
+        check("unsigned exe indicator", any(i["title"] == "Not digitally signed" for i in uj["indicators"]))
+    finally:
+        os.remove(tmp)
+
+    # Regression: a truncated ZIP must not emit malformed JSON / "could not parse analysis".
+    tz = os.path.join(FIX, "_trunc.zip")
+    open(tz, "wb").write(b"PK\x03\x04" + b"\x00" * 300)
+    try:
+        r = subprocess.run([CLI, tz, "--json"], capture_output=True)
+        zj = json.loads(r.stdout)  # raises if malformed
+        check("truncated zip parses", zj["format"]["label"] == "ZIP archive" or "zip" in zj)
+    finally:
+        os.remove(tz)
 
     batchdir = FIX
     r = subprocess.run([CLI, "--batch", batchdir], capture_output=True)

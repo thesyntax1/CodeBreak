@@ -199,9 +199,13 @@ RiskResult assessRisk(const uint8_t* d, size_t n, const std::string& lowerName,
     bool packed = agg.count("packing") || globalEntropy >= 7.4;
 
     if (iendsWith(lowerName, ".exe") && !packed && fmt == FMT_PE) {
+        // Only a *positive* signature counts as evidence; a "Not digitally signed"
+        // note or an unverified certificate table must not suppress this finding.
         bool signedAny = false;
         for (const Indicator& i : inds) {
-            if (icontains(i.title, "signed") || icontains(i.title, "authenticode")) signedAny = true;
+            const std::string& t = i.title;
+            if (icontains(t, "authenticode")) { signedAny = true; break; }
+            if (icontains(t, "digitally signed") && !icontains(t, "not ")) { signedAny = true; break; }
         }
         if (!signedAny) {
             addPlain("authenticity", "Unsigned portable executable", 10, 1);
