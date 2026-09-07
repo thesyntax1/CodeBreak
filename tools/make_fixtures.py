@@ -293,9 +293,9 @@ def build_pe():
     headers = dos_image + b'PE\x00\x00' + coff + bytes(opt) + sec
     headers = pad(headers, TEXT_RAW)
 
-    # certificate
+    # certificate table (standard WIN_CERTIFICATE layout)
     cert_body = bytes((i * 7 + 13) & 0xFF for i in range(96))
-    cert = u16(8 + len(cert_body)) + u16(0x0200) + u16(0x0002) + cert_body
+    cert = u32(8 + len(cert_body)) + u16(0x0200) + u16(0x0002) + cert_body
     cert_off = DATA_RAW + DATA_SZ
 
     img = bytearray()
@@ -812,6 +812,45 @@ def build_pkcs7():
         print("wrote", out, os.path.getsize(out), "bytes")
 
 
+def build_signed_pe():
+    pe_path = os.path.join(OUT, "fixture_pe.exe")
+    p7_path = os.path.join(OUT, "fixture_signature.p7")
+    img = bytearray(open(pe_path, "rb").read())
+    p7 = open(p7_path, "rb").read()
+    while len(img) % 8:
+        img += b"\x00"
+    cert_off = len(img)
+    dwlen = 8 + len(p7)
+    dwlen = (dwlen + 7) & ~7
+    cert = bytearray(u32(dwlen) + u16(0x0200) + u16(0x0002))
+    cert += p7
+    while len(cert) < dwlen:
+        cert += b"\x00"
+    assert len(cert) == dwlen
+    img += cert
+    PE_OFF = 0x100
+    secp = PE_OFF + 4 + 20 + 112 + 4 * 8
+    img[secp:secp + 8] = u32(cert_off) + u32(len(cert))
+    ck_off = PE_OFF + 4 + 20 + 64
+    img[ck_off:ck_off + 4] = b"\x00\x00\x00\x00"
+    s = 0
+    i = 0
+    while i + 1 < len(img):
+        s += img[i] | (img[i + 1] << 8)
+        s = (s & 0xFFFF) + (s >> 16)
+        i += 2
+    if len(img) & 1:
+        s += img[-1]
+        s = (s & 0xFFFF) + (s >> 16)
+    s = (s & 0xFFFF) + (s >> 16)
+    s = (s & 0xFFFF) + (s >> 16)
+    img[ck_off:ck_off + 4] = u32((s + len(img)) & 0xFFFFFFFF)
+    path = os.path.join(OUT, "fixture_signed.exe")
+    open(path, "wb").write(img)
+    print("wrote", path, len(img), "bytes")
+    return path
+
+
 if __name__ == "__main__":
     import sys
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
@@ -835,3 +874,5 @@ if __name__ == "__main__":
         build_ole()
     if which in ("all", "pkcs7"):
         build_pkcs7()
+    if which in ("all", "signedpe"):
+        build_signed_pe()

@@ -846,41 +846,54 @@ PeSummary peParse(const uint8_t* d, size_t n, Builder& b) {
         uint32_t certSize = c.dirs[4][1];
         b.kv("signed", certSize > 0);
         if (certSize && certOff < n) {
-            if (certOff + certSize > n) c.note("certificate table extends past end of file");
+            if ((uint64_t)certOff + certSize > n) c.note("certificate table extends past end of file");
+            size_t secEnd = std::min((uint64_t)certOff + certSize, (uint64_t)n);
+            size_t pos = certOff;
+            uint32_t firstBlobOff = 0, firstBlobLen = 0;
+            uint32_t winCertCount = 0;
             b.arr("certificates");
-            Rd cr(d, n, (size_t)certOff);
-            Pkcs7Result sign;
-            const uint8_t* signBlob = nullptr;
-            uint32_t signLen = 0;
-            for (int i = 0; i < 32 && cr.ok(); i++) {
-                uint16_t len = cr.u16();
+            while (pos + 8 <= secEnd && winCertCount < 64) {
+                Rd cr(d, n, pos);
+                uint32_t dwLen = cr.u32();
                 uint16_t revision = cr.u16();
                 uint16_t certType = cr.u16();
-                if (len < 8) break;
-                if (!signBlob && (size_t)len - 8 <= n - cr.o) { signBlob = d + cr.o; signLen = len - 8; }
+                uint64_t blobOff = pos + 8;
+                uint64_t blobLen = dwLen >= 8 ? (uint64_t)dwLen - 8 : 0;
+                if (dwLen < 8 || blobOff + blobLen > (uint64_t)n) { c.note("malformed WIN_CERTIFICATE at offset " + hexU(pos, 8)); break; }
                 b.beginObj();
-                b.kv("length", (uint64_t)len);
+                b.kv("length", (uint64_t)dwLen);
                 b.kvHex("revision", revision, 4);
                 const char* ctype = certType == 2 ? "PKCS #7 Signed Data" : certType == 3 ? "Reserved" : certType == 4 ? "TS Stack Signed" : "unknown";
                 b.kv("type", ctype);
                 b.kv("typeRaw", (uint64_t)certType);
                 b.endObj();
                 c.sum.signed_ = true;
-                if (!cr.skip((size_t)len - 8)) break;
+                if (certType == 2 && !firstBlobLen && blobLen >= 64) {
+                    firstBlobOff = (uint32_t)blobOff;
+                    firstBlobLen = (uint32_t)blobLen;
+                }
+                winCertCount++;
+                uint64_t aligned = (pos + (uint64_t)dwLen + 7u) & ~(uint64_t)7u;
+                if (aligned <= pos) break;
+                pos = (size_t)std::min(aligned, secEnd);
             }
             b.endArr();
-            if (signBlob && signLen >= 64 && parsePkcs7(signBlob, signLen, sign) && !sign.signers.empty()) {
-                b.obj("signer");
-                const X509Signer& s = sign.signers[0];
-                b.kv("subject", s.subject);
-                b.kv("issuer", s.issuer);
-                b.kv("serial", s.serial);
-                if (!s.notBefore.empty()) b.kv("notBefore", s.notBefore);
-                if (!s.notAfter.empty()) b.kv("notAfter", s.notAfter);
-                b.kv("certCount", (uint64_t)sign.certCount);
-                b.kv("thumbprintSha1", s.thumbprintSha1);
-                b.endObj();
-                c.sum.inds.push_back({ 0, "Authenticode signer", s.subject });
+            if (firstBlobLen) {
+                Pkcs7Result sign;
+                if (parsePkcs7(d + firstBlobOff, firstBlobLen, sign) && !sign.signers.empty()) {
+                    b.obj("signer");
+                    const X509Signer& s = sign.signers[0];
+                    b.kv("subject", s.subject);
+                    b.kv("issuer", s.issuer);
+                    b.kv("serial", s.serial);
+                    if (!s.notBefore.empty()) b.kv("notBefore", s.notBefore);
+                    if (!s.notAfter.empty()) b.kv("notAfter", s.notAfter);
+                    b.kv("signatureAlg", s.signatureAlg);
+                    b.kv("certCount", (uint64_t)sign.certCount);
+                    b.kv("thumbprintSha1", s.thumbprintSha1);
+                    b.endObj();
+                    c.sum.inds.push_back({ 0, "Authenticode signer", s.subject });
+                }
             }
         }
     }

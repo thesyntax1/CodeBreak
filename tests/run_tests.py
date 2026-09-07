@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import subprocess
 import sys
 import hashlib
@@ -143,11 +144,35 @@ def main():
     check("ole macro indicator", any("VBA macro" in i["title"] for i in ol["indicators"]))
     check("ole has risk", "risk" in ol)
 
+    def openssl_thumbprint(p7):
+        c = subprocess.run(["openssl", "pkcs7", "-inform", "DER", "-in", p7, "-print_certs"],
+                           capture_output=True)
+        if c.returncode != 0:
+            return None
+        fp = subprocess.run(["openssl", "x509", "-fingerprint", "-sha1", "-noout"],
+                            input=c.stdout, capture_output=True)
+        if fp.returncode != 0:
+            return None
+        s = fp.stdout.decode().lower()
+        m = re.search(r"=([0-9a-f]{40})", s.replace(":", ""))
+        return m.group(1) if m else None
+
+    expected_tp = openssl_thumbprint(os.path.join(FIX, "fixture_signature.p7"))
     ps = analyze(os.path.join(FIX, "fixture_signature.p7"))
     check("pkcs7 format", ps["format"]["label"].startswith("PKCS #7"))
     sg = ps["pkcs7"]["signers"][0]
     check("pkcs7 signer", "CodeBreak" in sg["subject"] and "CodeBreak" in sg["issuer"])
-    check("pkcs7 thumbprint", len(sg["thumbprintSha1"]) == 40)
+    check("pkcs7 thumbprint len", len(sg["thumbprintSha1"]) == 40)
+    if expected_tp:
+        check("pkcs7 thumbprint matches openssl", sg["thumbprintSha1"].lower() == expected_tp)
+
+    sx = analyze(os.path.join(FIX, "fixture_signed.exe"))
+    sc = sx["pe"]["security"]
+    check("pe signed", sc["signed"] is True)
+    check("pe authenticode signer", "CodeBreak Fixture Signer" in sc["signer"]["subject"])
+    if expected_tp:
+        check("pe signer thumbprint", sc["signer"]["thumbprintSha1"].lower() == expected_tp)
+    check("pe signer indicator", any("Authenticode signer" in i["title"] for i in sx["indicators"]))
 
     r = subprocess.run([CLI, "--compare", os.path.join(FIX, "fixture_pe.exe"), os.path.join(FIX, "fixture_pe.exe")], capture_output=True)
     cmp2 = json.loads(r.stdout)

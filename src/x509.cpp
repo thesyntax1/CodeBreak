@@ -154,7 +154,14 @@ bool parseCertificate(Region cert, ParsedCert& pc) {
     Region seq;
     uint8_t tag;
     if (!c.next(seq, tag) || tag != 0x30) return false;
-    pc.der.assign((const char*)cert.p, cert.n);
+    std::string full;
+    full.push_back((char)0x30);
+    size_t len = cert.n;
+    if (len < 0x80) full.push_back((char)len);
+    else if (len < 0x100) { full.push_back((char)0x81); full.push_back((char)len); }
+    else { full.push_back((char)0x82); full.push_back((char)(len >> 8)); full.push_back((char)(len & 0xFF)); }
+    full.append((const char*)cert.p, len);
+    pc.der = std::move(full);
     Der body(seq);
     Region r;
     uint8_t t;
