@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <map>
+#include <algorithm>
 #include <chrono>
 
 #ifdef _WIN32
@@ -758,6 +760,230 @@ static int cmdDeep(const std::string& path, bool indent) {
     return 0;
 }
 
+
+static int cmdGraph(const std::string& path, bool wantDot, bool wantIndent) {
+    std::vector<uint8_t> d;
+    std::string err;
+    if (!readFileBytes(path, d, err)) { fprintf(stderr, "error: %s\n", err.c_str()); return 1; }
+    Analysis a = analyzePath(path);
+    if (!a.ok) { fprintf(stderr, "error: %s\n", a.error.c_str()); return 1; }
+    std::string section;
+    uint64_t fileOff = 0, base = 0, length = 0, entryVA = 0;
+    const JVal* sec = findCodeSection(a.doc, section);
+    if (sec) {
+        fileOff = jnumOf(sec->get("rawOffset"));
+        if (!fileOff) fileOff = jnumOf(sec->get("offset"));
+        uint64_t raw = jnumOf(sec->get("rawSize"));
+        length = raw ? raw : jnumOf(sec->get("size"));
+        uint64_t vaddr = jnumOf(sec->get("virtualAddress"));
+        uint64_t saddr = jnumOf(sec->get("addr"));
+        base = vaddr ? vaddr : saddr;
+        if (a.doc.get("pe")) {
+            uint64_t ib = jnumOf(a.doc.get("pe")->get("imageBase"));
+            if (ib) base = ib + (vaddr ? vaddr : 0);
+        }
+    }
+    if (!length) length = d.size() > fileOff ? d.size() - fileOff : 0;
+    if (fileOff >= d.size()) { fprintf(stderr, "error: no code section\n"); return 1; }
+    if (fileOff + length > d.size()) length = d.size() - fileOff;
+    if (a.doc.get("pe")) {
+        uint64_t ib = jnumOf(a.doc.get("pe")->get("imageBase"));
+        uint64_t rva = jnumOf(a.doc.get("pe")->get("entryPointRva"));
+        if (ib && rva) entryVA = ib + rva;
+    } else if (a.doc.get("elf")) {
+        entryVA = jnumOf(a.doc.get("elf")->get("entry"));
+    }
+    if (!entryVA) entryVA = base;
+
+    struct ALine {
+        uint64_t addr, target;
+        bool call, jump, hasTarget, isRet;
+        std::string mnemonic, text;
+    };
+    std::vector<ALine> ls;
+    {
+        uint64_t pos = fileOff, end = fileOff + length;
+        while (pos < end && ls.size() < 6000) {
+            AsmInsn in;
+            size_t adv = disasmNext(d.data() + pos, (size_t)(end - pos), base + (pos - fileOff), in);
+            if (!adv) adv = 1;
+            ALine L;
+            L.addr = base + (pos - fileOff); L.target = in.target;
+            L.call = in.isCall; L.jump = in.isJump; L.hasTarget = in.hasTarget; L.isRet = in.isRet;
+            L.mnemonic = in.mnemonic; L.text = in.operands;
+            ls.push_back(L); pos += adv;
+        }
+    }
+    if (ls.empty()) { fprintf(stderr, "error: no decodable code bytes\n"); return 1; }
+
+    auto inRange = [&](uint64_t x) { return x >= base && x <= base + length; };
+    auto isPadding = [&](const ALine& L) {
+        return L.mnemonic == "nop" || L.mnemonic == "int3";
+    };
+    auto isTerm = [&](const ALine& L) {
+        return L.isRet || L.mnemonic == "hlt" || L.mnemonic == "retf";
+    };
+    auto plausibleStart = [&](const ALine& L) {
+        if (L.mnemonic == "endbr64") return true;
+        if (L.mnemonic == "push") {
+            for (const char* r : { "rbp", "rbx", "rdi", "rsi", "r12", "r13", "r14", "r15" })
+                if (L.text == r) return true;
+        }
+        return false;
+    };
+
+    // function starts: entry + every direct-call target within range
+    std::set<uint64_t> starts;
+    starts.insert(entryVA);
+    for (const ALine& L : ls)
+        if (L.call && L.hasTarget && inRange(L.target)) starts.insert(L.target);
+    // plus a plausible new function after each flow terminator (skip nop/int3 padding)
+    bool ended = false;
+    for (const ALine& L : ls) {
+        if (ended) {
+            if (isPadding(L)) continue;
+            if (plausibleStart(L)) starts.insert(L.addr);
+            ended = false;
+        }
+        if (isTerm(L)) ended = true;
+    }
+    std::vector<uint64_t> funcs(starts.begin(), starts.end());
+    std::sort(funcs.begin(), funcs.end());
+
+    auto ownerOf = [&](uint64_t addr) {
+        uint64_t owner = 0;
+        for (uint64_t f : funcs) if (f <= addr) owner = f; else break;
+        return owner;
+    };
+    auto fname = [&](uint64_t f) {
+        char b[40];
+        if (f == entryVA) snprintf(b, sizeof(b), "start_%llx", (unsigned long long)f);
+        else snprintf(b, sizeof(b), "sub_%llx", (unsigned long long)f);
+        return std::string(b);
+    };
+    std::map<uint64_t, std::set<uint64_t>> outInt;
+    std::map<uint64_t, std::set<std::string>> outExt;
+    std::map<uint64_t, int> inCnt;
+    std::map<uint64_t, std::vector<uint64_t>> callersOf; // target -> call-site addrs
+    size_t directCalls = 0, indirectCalls = 0;
+    for (const ALine& L : ls) {
+        if (!L.call) continue;
+        uint64_t own = ownerOf(L.addr);
+        if (L.hasTarget) {
+            directCalls++;
+            if (own) {
+                if (inRange(L.target)) {
+                    outInt[own].insert(L.target);
+                    inCnt[L.target]++;
+                    callersOf[L.target].push_back(L.addr);
+                } else {
+                    char b[40]; snprintf(b, sizeof(b), "ext_%llx", (unsigned long long)L.target);
+                    outExt[own].insert(std::string(b));
+                }
+            }
+        } else {
+            indirectCalls++;
+        }
+    }
+
+    bool human = !wantDot && !wantIndent && stdoutIsTty();
+    if (wantDot) {
+        std::string s;
+        s = "digraph callgraph {\n";
+        s += "  rankdir=LR;\n  node [shape=box, fontname=\"monospace\"];\n";
+        for (uint64_t f : funcs) s += "  \"" + fname(f) + "\" [label=\"" + fname(f) + "\\n@" + hexId(f) + "\"];\n";
+        for (auto& kv : outInt)
+            for (uint64_t t : kv.second) s += "  \"" + fname(kv.first) + "\" -> \"" + fname(t) + "\";\n";
+        for (auto& kv : outExt)
+            for (const std::string& t : kv.second) s += "  \"" + fname(kv.first) + "\" -> \"" + t + "\";\n";
+        s += "}\n";
+        printf("%s", s.c_str());
+        return 0;
+    }
+    if (human) {
+        std::string s;
+        s += "\n" + CYN() + "========== Call graph (" + section + ") ==========" + R() + "\n";
+        char st[96];
+        snprintf(st, sizeof(st), "  %s @ 0x%llx  |  %zu functions  |  %zu direct calls  |  %zu indirect calls",
+                 section.empty() ? "code" : section.c_str(), (unsigned long long)base,
+                 funcs.size(), directCalls, indirectCalls);
+        s += DIM() + st + R() + "\n";
+        for (uint64_t f : funcs) {
+            s += "\n" + B() + WHT() + "  " + fname(f) + R() + DIM() + "  @ 0x" + hexId(f) + R();
+            if (f == entryVA) s += "  " + DIM() + "(entry)" + R();
+            s += "\n";
+            std::vector<std::string> callees;
+            auto it = outInt.find(f);
+            if (it != outInt.end()) for (uint64_t t : it->second) callees.push_back(fname(t));
+            auto it2 = outExt.find(f);
+            if (it2 != outExt.end()) for (const std::string& t : it2->second) callees.push_back(t);
+            if (callees.empty()) {
+                s += DIM() + "      calls: (none)" + R() + "\n";
+            } else {
+                std::string line = "      calls: ";
+                for (size_t i = 0; i < callees.size(); i++) {
+                    line += CYN() + callees[i] + R();
+                    if (i + 1 < callees.size()) line += ", ";
+                }
+                s += line + "\n";
+            }
+            auto c = inCnt.find(f);
+            int callers = c == inCnt.end() ? 0 : c->second;
+            if (callers) {
+                s += DIM() + "      called from: ";
+                auto ci = callersOf.find(f);
+                std::string sites;
+                if (ci != callersOf.end())
+                    for (size_t i = 0; i < ci->second.size(); i++) {
+                        if (i) sites += ", ";
+                        char bb[24]; snprintf(bb, sizeof(bb), "0x%llx", (unsigned long long)ci->second[i]);
+                        sites += bb;
+                    }
+                s += sites + R() + "\n";
+            } else if (f != entryVA) {
+                s += DIM() + "      no internal direct callers" + R() + "\n";
+            }
+        }
+        o(s);
+        return 0;
+    }
+    std::string j;
+    Builder b(j);
+    b.beginObj();
+    b.kv("format", a.doc.get("format")->getStr("label"));
+    b.kv("section", section);
+    b.kv("entry", hexU(entryVA, 0));
+    b.kv("directCalls", (int64_t)directCalls);
+    b.kv("indirectCalls", (int64_t)indirectCalls);
+    b.arr("functions");
+    for (uint64_t f : funcs) {
+        b.beginObj();
+        b.kv("addr", hexU(f, 0));
+        b.kv("name", fname(f));
+        b.kv("entry", f == entryVA);
+        b.arr("calls");
+        auto it = outInt.find(f);
+        std::vector<uint64_t> allInt;
+        if (it != outInt.end()) for (uint64_t t : it->second) allInt.push_back(t);
+        std::sort(allInt.begin(), allInt.end());
+        for (uint64_t t : allInt) b.valStr(fname(t));
+        auto it2 = outExt.find(f);
+        if (it2 != outExt.end()) for (const std::string& t : it2->second) b.valStr(t);
+        b.endArr();
+        auto ci = callersOf.find(f);
+        b.arr("callers");
+        if (ci != callersOf.end()) for (uint64_t t : ci->second) b.valStr(hexU(t, 0));
+        b.endArr();
+        auto c = inCnt.find(f);
+        b.kv("callerCount", (int64_t)(c == inCnt.end() ? 0 : c->second));
+        b.endObj();
+    }
+    b.endArr();
+    b.endObj();
+    printf("%s\n", wantIndent ? prettyJson(j).c_str() : j.c_str());
+    return 0;
+}
+
 static int runSingle(const std::vector<std::string>& args) {
     std::string path = args[0];
     std::string pat;
@@ -1068,6 +1294,8 @@ static void printUsage() {
         "                                             (parse summary + behavior + code)\n"
         "  codebreak-cli <file> --behavior            static host-behavior trace (network,\n"
         "                                             file paths, processes, persistence)\n"
+        "  codebreak-cli <file> --calls               static call graph of the code section\n"
+        "                [--dot]                      (human/JSON, or Graphviz DOT)\n"
         "  codebreak-cli <file> --asm                 x86-64 disassembly of the code section\n"
         "                [--offset N] [--base N] [--length N]\n"
         "  codebreak-cli <file> --strings [PATTERN] [--min-len N]\n"
@@ -1092,6 +1320,7 @@ static void printHelp() {
         "  risk <file>          risk assessment\n"
         "  behavior <file>      static host-behavior trace\n"
         "  deep <file>          combined deep analysis (summary+behavior+code)\n"
+        "  calls <file> [--dot] static call graph of code\n"
         "  asm <file>           x86-64 disassembly of code (alias code/disasm)\n"
         "  strings <file> ...   extract strings\n"
         "  hex <file> OFFSET    hex dump\n"
@@ -1171,6 +1400,15 @@ static int runTokens(const std::vector<std::string>& args) {
             if (args[i] == "--indent" || args[i] == "--pretty") dIndent = true;
         return cmdDeep(args[1], dIndent);
     }
+    if (first == "--calls" || first == "calls" || first == "--graph" || first == "graph") {
+        if (args.size() < 2) { fprintf(stderr, "usage: calls <file> [--dot]\n"); return 2; }
+        bool gDot = false, gIndent = false;
+        for (size_t i = 2; i < args.size(); i++) {
+            if (args[i] == "--dot") gDot = true;
+            if (args[i] == "--indent" || args[i] == "--pretty") gIndent = true;
+        }
+        return cmdGraph(args[1], gDot, gIndent);
+    }
     if (first == "-h" || first == "--help" || first == "help") { printUsage(); return 0; }
     if (first == "json") {
         if (args.size() < 2) { fprintf(stderr, "usage: json <file>\n"); return 2; }
@@ -1235,6 +1473,11 @@ static int runTokens(const std::vector<std::string>& args) {
             bool ind = false;
             for (const auto& b2 : args) if (b2 == "--indent" || b2 == "--pretty") ind = true;
             return cmdDeep(args[0], ind);
+        }
+        if (a == "--calls" || a == "--graph") {
+            bool gd = false, gi = false;
+            for (const auto& b2 : args) { if (b2 == "--dot") gd = true; if (b2 == "--indent" || b2 == "--pretty") gi = true; }
+            return cmdGraph(args[0], gd, gi);
         }
         if (a == "--asm" || a == "--code" || a == "--disasm") {
             uint64_t off = UINT64_MAX, ba = UINT64_MAX, len = UINT64_MAX;

@@ -212,6 +212,25 @@ def main():
     check("elf asm nonempty", len(t2) > 3)
     check("elf asm mnemonics", any(x.split()[0] in ("mov", "push", "ret", "call", "jmp", "je", "jne") for x in t2))
 
+    r = subprocess.run([CLI, os.path.join(FIX, "fixture_pe.exe"), "--calls"], capture_output=True)
+    cg = json.loads(r.stdout)
+    check("graph pe keys", set(cg) == {"format", "section", "entry", "directCalls", "indirectCalls", "functions"})
+    check("graph pe entry", cg["entry"] == "0x140001000" and cg["section"] == ".text")
+    check("graph pe functions", len(cg["functions"]) >= 1 and cg["functions"][0]["name"] == "start_140001000")
+    check("graph pe entry flag", cg["functions"][0]["entry"] is True and all("callers" in f and "calls" in f for f in cg["functions"]))
+
+    r = subprocess.run([CLI, os.path.join(FIX, "fixture_elf64"), "--calls"], capture_output=True)
+    eg = json.loads(r.stdout)
+    check("graph elf functions", len(eg["functions"]) >= 4)
+    check("graph elf has callers", any(f["callerCount"] >= 1 for f in eg["functions"]))
+    check("graph elf has edges", any(len(f["calls"]) >= 1 for f in eg["functions"]))
+    start = next(f for f in eg["functions"] if f["entry"])
+    check("graph elf entry flag", start["name"].startswith("start_"))
+
+    r = subprocess.run([CLI, os.path.join(FIX, "fixture_elf64"), "--calls", "--dot"], capture_output=True)
+    dot = r.stdout.decode()
+    check("graph dot", dot.startswith("digraph callgraph") and "->" in dot)
+
     batchdir = FIX
     r = subprocess.run([CLI, "--batch", batchdir], capture_output=True)
     bd = json.loads(r.stdout)

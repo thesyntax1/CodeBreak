@@ -191,8 +191,8 @@ size_t disasmNext(const uint8_t* d, size_t n, uint64_t addr, AsmInsn& out) {
     case 0x90: return byteOp("nop");
     case 0xF4: return byteOp("hlt");
     case 0xCC: return byteOp("int3");
-    case 0xC3: return byteOp("ret");
-    case 0xCB: return byteOp("retf");
+    case 0xC3: mk(out, "ret", "", false, 0, false, false, true); return c.p;
+    case 0xCB: mk(out, "retf", "", false, 0, false, false, true); return c.p;
     case 0xC2: { int16_t i = (int16_t)c.u16(); mk(out, "ret", immStr(i), false, 0, false, false, true); return c.p; }
     case 0xCA: { int16_t i = (int16_t)c.u16(); mk(out, "retf", immStr(i), false, 0, false, false, true); return c.p; }
     case 0xE8: return rel32("call", true, false);

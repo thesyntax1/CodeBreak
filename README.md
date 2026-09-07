@@ -32,6 +32,9 @@ codebreak-cli <file> --json                 # force raw JSON
 codebreak-cli <file> --pretty               # force indented JSON
 codebreak-cli <file> --risk                 # only the risk assessment (JSON)
 codebreak-cli <file> --behavior             # static host-behavior trace (see below)
+codebreak-cli <file> --deep                 # combined summary + behavior + disassembly
+codebreak-cli <file> --calls                # static call graph of the code section
+                        [--dot]            #   ... or export Graphviz DOT
 codebreak-cli <file> --asm                  # x86-64 disassembly of the code section
                         [--offset N] [--base N] [--length N]
 codebreak-cli <file> --strings [PATTERN]    # extract strings; optional filter substring
@@ -52,11 +55,23 @@ Exit code 0 on success, 1 on error (message on stderr). `--report` and the batch
 
 ### Interactive shell
 
-Run `codebreak-cli` with **no arguments** to enter an interactive `codebreak>` shell where you type commands the same way you would on the command line — bare file paths, `risk <file>`, `behavior <file>`, `asm <file>` (alias `code`/`disasm`), `strings <file>`, `hex <file> 0x400`, `batch <dir>`, `compare <a> <b>`, `hash <file>`, `report <file> out.html`, plus `history`, `help`, `version`, `clear` and `exit`. This is handy when you double-click the exe on Windows instead of running it from a terminal. Your typed commands are saved to a history file (`~/.codebreak_history` on Linux, `%APPDATA%\CodeBreak.history` on Windows).
+Run `codebreak-cli` with **no arguments** to enter an interactive `codebreak>` shell where you type commands the same way you would on the command line — bare file paths, `risk <file>`, `behavior <file>`, `deep <file>`, `calls <file> [--dot]`, `asm <file>` (alias `code`/`disasm`), `strings <file>`, `hex <file> 0x400`, `batch <dir>`, `compare <a> <b>`, `hash <file>`, `report <file> out.html`, plus `history`, `help`, `version`, `clear` and `exit`. This is handy when you double-click the exe on Windows instead of running it from a terminal. Your typed commands are saved to a history file (`~/.codebreak_history` on Linux, `%APPDATA%\CodeBreak.history` on Windows).
 
 ### Code extraction (disassembly)
 
 `codebreak-cli <file> --asm` decodes the main executable section of a native PE or ELF x86-64 binary into an objdump-style listing: address, raw bytes, mnemonic and operands. It resolves relative branches/jumps/calls to their target addresses and follows RIP-relative addressing and ModRM/SIB forms. Step into any byte window with `--offset N --base N --length N` (e.g. to walk a single function). Output is a colorized terminal table, or `{"code":{"lines":[...]}}` JSON when piped.
+
+The on-screen listing borrows RE-workstation conventions: call targets are marked `sub_<addr>:` and branch targets `loc_<addr>:`, printed as a label line above the target and as a `; sub_...` / `; loc_...` comment on the referencing instruction. (The piped JSON stays machine-neutral and omits these labels.)
+
+### Call graph (static)
+
+`codebreak-cli <file> --calls` reconstructs a *static call graph* from the decoded code — no execution. It finds function starts at the entry point, at every resolved direct call target, and at any `endbr64` / callee-save prologue that follows a `ret`/`hlt` terminator (skipping `nop`/`int3` padding). Each direct call is then attributed to its enclosing function, and per function the tool reports what it calls, which addresses call it, and a direct/indirect call tally.
+
+- **terminal** → a colorized function index with caller/callee lists;
+- **piped** → `{"functions":[{name,addr,calls,callers,callerCount}],...}` JSON;
+- `--dot` → a Graphviz graph you can render, e.g. `dot -Tsvg call.gv > call.svg`.
+
+Internal calls resolve to other functions in the listing (`sub_…`); calls that leave the decoded section (PLT stubs, IAT thunks) are marked `ext_<addr>`; indirect calls (`call rax`, `call [rip+…]`) are counted but have no static target. The graph is a heuristic over decoded direct calls — unrooted branches and data-driven entries are a known limitation, not a guarantee.
 
 ### Host behavior trace (static)
 
