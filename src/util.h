@@ -4,10 +4,6 @@
 #include <string>
 #include <vector>
 
-#ifdef _WIN32
-std::wstring utf8ToWide(const std::string& s);
-#endif
-
 namespace cb {
 
 class Builder;
@@ -97,6 +93,10 @@ struct FileInfo {
 FileInfo queryFileInfo(const std::string& pathUtf8);
 
 bool readFileBytes(const std::string& pathUtf8, std::vector<uint8_t>& out, std::string& errOut);
+
+#ifdef _WIN32
+std::wstring utf8ToWide(const std::string& s);
+#endif
 
 struct WalkOptions {
     bool includeHiddenDirs = false;
