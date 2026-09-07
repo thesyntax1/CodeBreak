@@ -24,6 +24,7 @@
 #include <sstream>
 #include <chrono>
 #include <cstring>
+#include <cwchar>
 
 #include "../formats.h"
 #include "../jsonw.h"
@@ -62,6 +63,7 @@ static const wchar_t* WND_TITLE = L"CodeBreak — Binary Analysis Suite";
 static HWND g_hwnd = nullptr;
 static ICoreWebView2* g_webview = nullptr;
 static ICoreWebView2Controller* g_controller = nullptr;
+static ICoreWebView2Environment* g_env = nullptr;
 
 typedef HRESULT(STDMETHODCALLTYPE* PFN_CreateWv2EnvWithOptions)(
     PCWSTR browserExecutableFolder, PCWSTR userDataFolder,
@@ -405,7 +407,6 @@ public:
             return S_OK;
         }
         g_controller = result;
-        g_controller->AddRef();
         ICoreWebView2* wv = nullptr;
         if (SUCCEEDED(result->get_CoreWebView2(&wv)) && wv) {
             g_webview = wv;
@@ -464,8 +465,16 @@ public:
             PostQuitMessage(1);
             return S_OK;
         }
-        env->CreateCoreWebView2Controller(g_hwnd, new ControllerCreatedHandler(html));
-        env->Release();
+        g_env = env;
+        HRESULT hr = env->CreateCoreWebView2Controller(g_hwnd, new ControllerCreatedHandler(html));
+        if (FAILED(hr)) {
+            wchar_t err[96];
+            swprintf(err, 96, L\"WebView2 controller creation failed (0x%08X)\", (unsigned int)hr);
+            MessageBoxW(g_hwnd, err, L\"CodeBreak\", MB_ICONERROR);
+            if (g_env) { g_env->Release(); g_env = nullptr; }
+            PostQuitMessage(1);
+            return S_OK;
+        }
         return S_OK;
     }
 };
@@ -535,6 +544,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     case WM_DESTROY:
         if (g_webview) { g_webview->Release(); g_webview = nullptr; }
         if (g_controller) { g_controller->Release(); g_controller = nullptr; }
+        if (g_env) { g_env->Release(); g_env = nullptr; }
         PostQuitMessage(0);
         return 0;
     default:
