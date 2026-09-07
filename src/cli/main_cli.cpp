@@ -540,21 +540,21 @@ static std::string asmHumanText(const std::vector<AsmLine>& lines, uint64_t base
     };
 
     std::string s;
-    s += "\\n";
+    s += "\n";
     std::string t = section.empty() ? std::string("code") : section;
-    s += CYN() + "========== " + t + " (x86-64 disassembly) ==========" + R() + "\\n";
+    s += CYN() + "========== " + t + " (x86-64 disassembly) ==========" + R() + "\n";
     char sb[64];
     snprintf(sb, sizeof(sb), "%s @ 0x%llx  (%llu bytes)", section.empty() ? "code" : section.c_str(),
              (unsigned long long)base, (unsigned long long)length);
-    s += DIM() + "  " + sb + R() + "\\n\\n";
+    s += DIM() + "  " + sb + R() + "\n\n";
     size_t n = 0;
     for (const AsmLine& L : lines) {
         if (limit && n >= limit) {
-            s += DIM() + "  ... (use 'asm' for the full listing)" + R() + "\\n";
+            s += DIM() + "  ... (use 'asm' for the full listing)" + R() + "\n";
             break;
         }
         std::string lb = labFor(L.addr);
-        if (!lb.empty()) s += B() + WHT() + "        " + lb + ":" + R() + "\\n";
+        if (!lb.empty()) s += B() + WHT() + "        " + lb + ":" + R() + "\n";
         char ad[24];
         snprintf(ad, sizeof(ad), "0x%06llx", (unsigned long long)L.addr);
         std::string ln = "  " + CYN() + ad + R() + "  ";
@@ -566,10 +566,10 @@ static std::string asmHumanText(const std::vector<AsmLine>& lines, uint64_t base
             std::string lf = labFor(L.target);
             if (!lf.empty()) ln += "  " + DIM() + "; " + lf + R();
         }
-        s += ln + "\\n";
+        s += ln + "\n";
         n++;
     }
-    if (lines.empty()) s += DIM() + "  no decodable code bytes" + R() + "\\n";
+    if (lines.empty()) s += DIM() + "  no decodable code bytes" + R() + "\n";
     return s;
 }
 
