@@ -1,22 +1,8 @@
 # CodeBreak
 
-A native binary analysis suite for Windows. CodeBreak loads compiled files — EXE, DLL, APK, JAR, DEX, ELF, Mach-O, Java classes, GZIP/TAR archives, PDF documents, ZIP — and shows what is actually inside them: machine-code structure, metadata, hashes, entropy, strings, and raw bytes. On top of that it runs a transparent **heuristic risk-scoring engine** that turns the parsed facts into a 0–100 threat score. Nothing is guessed or faked; every field is parsed from the file itself.
+A native binary analysis suite that runs entirely in the terminal. CodeBreak loads compiled files — EXE, DLL, APK, JAR, DEX, ELF, Mach-O, Java classes, GZIP/TAR archives, PDF documents, ZIP — and shows what is actually inside them: machine-code structure, metadata, hashes, entropy, strings, and raw bytes. On top of that it runs a transparent **heuristic risk-scoring engine** that turns the parsed facts into a 0–100 threat score. Nothing is guessed or faked; every field is parsed from the file itself.
 
-The GUI is a self-contained native Win32 application (common controls only, no browser component and no runtime dependency). The parsing engine is dependency-free C++17 and also builds as a standalone CLI on Linux and Windows.
-
-## The GUI
-
-Run `CodeBreak.exe`, drop a file anywhere on the window (or **File → Open File...**) and the analysis appears in milliseconds. The whole UI is drawn with the native Windows common controls in a dark professional theme — no embedded browser, no WebView2 runtime to install, nothing extra to ship next to the exe.
-
-- **Header** — the CodeBreak title, an **Open File…** button and a live, color-coded **RISK** badge (green → red by severity).
-- **Summary bar** — the file name and size, the detected format and the number of security indicators.
-- **Find box** — type any field name (`sha256`, `risk`, `imports`, `subject`, `version`...) and the tree filters live to matching fields (`Ctrl+F` focuses it).
-- **Field tree** — the full parsed analysis as a browsable dark tree: every format section (PE sections/imports/security, ELF, APK manifest/DEX, ZIP entries, OLE2 streams, PKCS #7 signers, ...), hashes, entropy and risk signals.
-- **Detail pane** — select any node to inspect its value (a scalar, or a readable summary of an object/array).
-- **Menus** — File (Open, **Export HTML Report…**, Recent files, Exit), Edit (Find, Expand All, Collapse All) and Help (About).
-- **Status bar** — the active file path, its SHA-256 prefix and the analysis time.
-
-Heavy work (file reads, parsing, hashing) runs on a worker thread so the window never blocks; the UI thread only renders and dispatches. Analysis is also accepted on the command line: `CodeBreak.exe somefile.exe`.
+The parsing engine is a single dependency-free C++17 codebase (`cb_core`) with one front end: `codebreak-cli`, a terminal-only command line tool that builds on Linux and Windows.
 
 ## Risk & threat model
 
@@ -32,27 +18,38 @@ Every analysis ends with a `risk` node computed by `src/risk.cpp`. The engine is
 
 Signal groups include: **findings** (the parser-generated indicators, weighted by severity), **obfuscation / packing** (global and entry-region entropy, UPX/Themida/VMProtect & other protector markers), **execution** (VirtualAllocEx/WriteProcessMemory/CreateRemoteThread/process-hollowing primitives), **network** (download/HTTP-client APIs), **shell & persistence** (PowerShell `-enc`, cmd, mshta, certutil, reg add, schtasks), **encoding** (Base64 / crypto primitives), and **authenticity** (unsigned PE with no Authenticode). High-entropy content and protector strings are only scored as packing when they co-occur or sit at the code entry; the weights are tuned so benign, legitimately-compiled programs stay at clean/low.
 
-The CLI mirrors this for automation: `--risk` prints the assessment alone, `--report` writes an HTML report, `--compare` diffs two files' analyses, and `--batch` scans whole directory trees into JSON/CSV/HTML with per-file risk.
-
 ## CLI usage
 
+`codebreak-cli` adapts its output to where stdout goes:
+
+- **terminal** → a color-coded human summary (RISK badge, hashes, entropy, indicators);
+- **piped / redirected** → clean raw JSON, ready for `jq`.
+
 ```sh
-codebreak-cli <file>                       # everything as one JSON document
-codebreak-cli <file> --risk                # only the risk assessment
-codebreak-cli <file> --report out.html     # self-contained HTML report
-codebreak-cli <file> --strings --filter kernel32 --min-length 6
-codebreak-cli <file> --strings --kind wide
-codebreak-cli <file> --hex --offset 0x400 --length 512
-codebreak-cli --hash <file>                # full analysis JSON for one file
-codebreak-cli --compare A B                # side-by-side structural + hash comparison
-codebreak-cli --batch DIR                  # scan a tree -> JSON on stdout
-codebreak-cli --batch DIR --json scan.json --csv scan.csv --html report.html
-codebreak-cli --batch DIR --limit 5000 --max-mb 64
+codebreak-cli <file>                        # human summary on a tty, raw JSON when piped
+codebreak-cli <file> --view                 # force the human summary
+codebreak-cli <file> --json                 # force raw JSON
+codebreak-cli <file> --pretty               # force indented JSON
+codebreak-cli <file> --risk                 # only the risk assessment (JSON)
+codebreak-cli <file> --strings [PATTERN]    # extract strings; optional filter substring
+                        [--min-len N]      # minimum string length (default 4)
+                        [--kind all|ascii|wide] [--count N]
+codebreak-cli <file> --hex OFFSET           # hex dump from a byte offset
+                        [--hex-len N]       # how many bytes to show (default 256)
+codebreak-cli <file> --report OUT.html      # write a self-contained HTML report
+codebreak-cli --hash <file>                 # full analysis JSON for one file
+codebreak-cli --compare A B [--view]        # side-by-side structural + hash comparison
+codebreak-cli --batch DIR                   # scan a tree -> table on a tty, JSON when piped
+codebreak-cli --batch DIR --json F --csv F --html F   # export the batch three ways
+codebreak-cli --batch DIR --limit N --max-mb N        # bound the scan
+codebreak-cli --version | -h
 ```
 
-Exit code 0 on success, 1 on error (message on stderr). All output is UTF-8 JSON, suitable for piping into `jq`. `--report` and the batch `--html` flag write self-contained HTML reports.
+Exit code 0 on success, 1 on error (message on stderr). `--report` and the batch `--html` flag write self-contained HTML reports.
 
-Run `codebreak-cli` with **no arguments** to enter an interactive shell where you can type commands such as a bare file path, `risk <file>`, `batch <dir>`, `compare <a> <b>`, `hash <file>` or `gui <file>` — useful when you double-click the exe instead of running it from a terminal.
+### Interactive shell
+
+Run `codebreak-cli` with **no arguments** to enter an interactive `codebreak>` shell where you type commands the same way you would on the command line — bare file paths, `risk <file>`, `strings <file>`, `hex <file> 0x400`, `batch <dir>`, `compare <a> <b>`, `hash <file>`, `report <file> out.html`, plus `history`, `help`, `version`, `clear` and `exit`. This is handy when you double-click the exe on Windows instead of running it from a terminal. Your typed commands are saved to a history file (`~/.codebreak_history` on Linux, `%APPDATA%\CodeBreak.history` on Windows).
 
 ## What is parsed
 
@@ -76,7 +73,15 @@ Entropy is computed over 16 KB blocks with Shannon's formula; the overall figure
 
 ## Building
 
-### Windows GUI (Visual Studio 2022)
+### Linux
+
+```sh
+./build.sh          # plain g++/CMake, no dependencies
+```
+
+Output: `build-cli/codebreak-cli`.
+
+### Windows (Visual Studio 2022)
 
 Requirements: Visual Studio 2022 with the *Desktop development with C++* workload (CMake ships with it). From the repository root:
 
@@ -84,7 +89,7 @@ Requirements: Visual Studio 2022 with the *Desktop development with C++* workloa
 build.bat
 ```
 
-Output: `build\Release\CodeBreak.exe` and `build\Release\codebreak-cli.exe`. Both are self-contained; the GUI uses only the standard Windows common controls and needs no extra DLLs or runtime to be installed.
+Output: `build\Release\codebreak-cli.exe`. It is a plain console program — run it from a terminal, or double-click it to open the interactive shell.
 
 Equivalent manual commands:
 
@@ -94,12 +99,6 @@ cmake --build build --config Release
 ```
 
 MinGW-w64 (UCRT x64) also works: `cmake -S . -B build-mingw -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release` then `cmake --build build-mingw -j`.
-
-### CLI only (Linux / Windows)
-
-```sh
-./build.sh          # Linux: plain g++, no dependencies
-```
 
 ## Architecture
 
@@ -117,27 +116,21 @@ src/
   util.cpp         file IO, string building, wide-string decode, formatting,
                    recursive directory walk (batch scans)
   jsonw.h jsonr.h  minimal JSON writer (engine) and parser (host)
-  cli/main_cli.cpp command line front end (single-file, risk, report, batch)
-  host/main.cpp    native Win32 GUI (tree + find + detail, no browser)
-  host/app.rc      application icon, version info and manifest
+  cli/main_cli.cpp terminal front end (human/JSON views, risk, report, batch,
+                   interactive shell)
 tests/
   run_tests.py     assertion suite; checks real parser output
 tools/make_fixtures.py  builds PE, APK, DEX, ELF, Mach-O, class, ZIP, GZIP,
                         TAR, PDF, OLE2 (.doc) and PKCS #7 fixtures from scratch
 tools/cfbwriter.py      minimal OLE2 compound-file writer used by make_fixtures.py
-tools/make_icon.py       regenerates the application icon
 ```
-
-Heavy work (file reads, parsing, hashing) runs on a worker thread that posts its result back to the UI thread; the UI thread only renders and dispatches.
-
-To regenerate the application icon after editing `tools/make_icon.py`, run `python tools/make_icon.py` and rebuild.
 
 ## Continuous integration
 
 `.github/workflows/build.yml` runs on every push, pull request and on demand (Actions -> `build` -> Run workflow). It has two jobs:
 
-- **Windows x64 (MSVC)** — configures `-A x64` and builds the full release, then uploads a self-contained `codebreak-windows-x64` artifact containing `CodeBreak.exe` and `codebreak-cli.exe`.
-- **Linux CLI + tests** — builds `codebreak-cli` with the GUI disabled, regenerates every fixture and runs the full `tests/run_tests.py` suite, then uploads the `codebreak-linux-cli` artifact.
+- **Windows x64 (MSVC)** — configures `-A x64` and builds the release, then uploads `codebreak-cli.exe` as the `codebreak-windows-x64` artifact.
+- **Linux CLI + tests** — builds `codebreak-cli`, regenerates every fixture and runs the full `tests/run_tests.py` suite, then uploads the `codebreak-linux-cli` artifact.
 
 Grab the built exe from the workflow's **Artifacts** panel on the Actions tab (a workflow run must finish first; push a tag `v*` or click *Run workflow* to trigger a build).
 

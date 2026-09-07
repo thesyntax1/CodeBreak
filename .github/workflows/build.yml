@@ -12,7 +12,7 @@ env:
 
 jobs:
   windows-exe:
-    name: Windows x64 (CodeBreak.exe + codebreak-cli.exe)
+    name: Windows x64 (codebreak-cli.exe)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,13 +23,11 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Upload Windows binaries
+      - name: Upload Windows binary
         uses: actions/upload-artifact@v4
         with:
           name: codebreak-windows-x64
-          path: |
-            build/Release/CodeBreak.exe
-            build/Release/codebreak-cli.exe
+          path: build/Release/codebreak-cli.exe
           if-no-files-found: error
 
   linux-cli-and-tests:
@@ -42,7 +40,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential openssl
 
       - name: Configure
-        run: cmake -S . -B build -DCB_BUILD_GUI=OFF -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build -j

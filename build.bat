@@ -12,6 +12,5 @@ cmake --build build --config Release
 if errorlevel 1 exit /b 1
 echo.
 echo Build complete:
-echo   build\Release\CodeBreak.exe
 echo   build\Release\codebreak-cli.exe
 endlocal
