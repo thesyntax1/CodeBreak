@@ -1,0 +1,15 @@
+build/
+build-*/
+out/
+dist/
+*.obj
+*.o
+*.exe
+*.dll
+*.lib
+!third_party/webview2/**/*.dll
+!third_party/webview2/**/*.lib
+
+release/
+__pycache__/
+*.pyc

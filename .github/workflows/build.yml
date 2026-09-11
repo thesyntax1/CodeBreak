@@ -1,0 +1,180 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to attach binaries to a release on tags
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: "4"
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64 (MSVC)
+            os: windows-latest
+            platform: windows-x64
+            artifact: codebreak-windows-x64
+            cmake_args: -A x64
+            bin: build/Release/codebreak-cli.exe
+            ext: .exe
+
+          - name: Linux x64 (GCC)
+            os: ubuntu-latest
+            platform: linux-x64
+            artifact: codebreak-linux-cli
+            cmake_args: -DCMAKE_BUILD_TYPE=Release
+            bin: build/codebreak-cli
+            ext: ""
+
+          # 32-bit target: size_t is 32 bits here, which is where mixed-width
+          # std::min/std::max calls and size_t arithmetic wrap. This job is the
+          # regression guard for that whole bug class.
+          - name: Linux x86 32-bit (GCC)
+            os: ubuntu-latest
+            platform: linux-x86
+            artifact: codebreak-linux-x86
+            cmake_args: -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-m32 -DCMAKE_EXE_LINKER_FLAGS=-m32
+            multilib: true
+            bin: build/codebreak-cli
+            ext: ""
+
+          - name: macOS universal (clang)
+            os: macos-latest
+            platform: macos-universal
+            artifact: codebreak-macos-universal
+            cmake_args: -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES='x86_64;arm64'
+            bin: build/codebreak-cli
+            ext: ""
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # on a "release published" event the tag, not the default branch
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install 32-bit toolchain
+        if: matrix.multilib
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y g++-multilib libc6-dev-i386
+
+      - name: Configure
+        run: cmake -S . -B build ${{ matrix.cmake_args }}
+
+      - name: Build
+        run: cmake --build build --config Release -j
+
+      - name: Show binary info
+        shell: bash
+        run: |
+          ls -l "${{ matrix.bin }}"
+          file "${{ matrix.bin }}" 2>/dev/null || true
+          "${{ matrix.bin }}" --version || true
+
+      - name: Generate fixtures
+        run: python tools/make_fixtures.py
+
+      - name: Run test suite
+        env:
+          CB_CLI: ${{ github.workspace }}/${{ matrix.bin }}
+        run: python tests/run_tests.py
+
+      - name: Corrupt-input smoke test
+        env:
+          CB_CLI: ${{ github.workspace }}/${{ matrix.bin }}
+        run: python tests/sanitize_smoke.py
+
+      - name: Package
+        shell: bash
+        run: |
+          set -e
+          mkdir -p stage dist
+          cp "${{ matrix.bin }}" "stage/codebreak-cli${{ matrix.ext }}"
+          cp README.md stage/README.md
+          python -c "import shutil; shutil.make_archive('dist/codebreak-cli-${{ matrix.platform }}', 'zip', 'stage')"
+          ls -l stage dist
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: stage/codebreak-cli${{ matrix.ext }}
+          if-no-files-found: error
+
+      # Releases are created by the maintainer (any version/tag they choose);
+      # when one exists for this ref the binaries are attached to it here.
+      - name: Attach binaries to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'release'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          tag="${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}"
+          asset="dist/codebreak-cli-${{ matrix.platform }}.zip"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$tag" "$asset" --clobber --repo "$GITHUB_REPOSITORY"
+            echo "Attached $asset to release $tag"
+          else
+            echo "::notice::No release exists for $tag yet. Publish it (or push the tag again) and the binaries are attached automatically; meanwhile they are in this run's artifacts."
+          fi
+
+  sanitize:
+    name: Sanitizers (ASan + UBSan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Configure (AddressSanitizer + UndefinedBehaviorSanitizer)
+        run: >
+          cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all -g -O1"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build
+        run: cmake --build build-asan -j
+
+      - name: Generate fixtures
+        run: python3 tools/make_fixtures.py
+
+      - name: Test suite under sanitizers
+        env:
+          CB_CLI: ${{ github.workspace }}/build-asan/codebreak-cli
+        run: python3 tests/run_tests.py
+
+      - name: Corrupt-input fuzz smoke under sanitizers
+        env:
+          CB_CLI: ${{ github.workspace }}/build-asan/codebreak-cli
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: python3 tests/sanitize_smoke.py

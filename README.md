@@ -1,0 +1,249 @@
+# CodeBreak
+
+A native binary analysis suite that runs entirely in the terminal. CodeBreak loads compiled files — EXE, DLL, APK, JAR, DEX, ELF, Mach-O, Java classes, GZIP/TAR archives, PDF documents, ZIP — and shows what is actually inside them: machine-code structure, metadata, hashes, entropy, strings, and raw bytes. On top of that it runs a transparent **heuristic risk-scoring engine** that turns the parsed facts into a 0–100 threat score. Nothing is guessed or faked; every field is parsed from the file itself.
+
+The parsing engine is a single dependency-free C++17 codebase (`cb_core`) with one front end: `codebreak-cli`, a terminal-only command line tool that builds on Linux and Windows.
+
+> **Ready-to-run builds** — precompiled binaries for Windows and Linux are published under the **Releases** tab on GitHub (one binary per release, no install needed). See [Releases](https://github.com/thesyntax1/CodeBreak/releases).
+
+## Risk & threat model
+
+Every analysis ends with a `risk` node computed by `src/risk.cpp`. The engine is intentionally *transparent*: a set of weighted signal groups, each reporting its category, weight and hit count, sum to a score capped at 100.
+
+| Band | Score | Meaning |
+|---|---|---|
+| clean | 0–24 | no notable characteristics |
+| low | 25–44 | benign quirks (e.g. high entropy alone) |
+| medium | 45–64 | several weak signals or one strong one |
+| high | 65–84 | strong evidence of packing / injection / unsigned code |
+| critical | 85–100 | multiple corroborating indicators |
+
+Signal groups include: **findings** (the parser-generated indicators, weighted by severity), **obfuscation / packing** (global and entry-region entropy, UPX/Themida/VMProtect & other protector markers), **execution** (VirtualAllocEx/WriteProcessMemory/CreateRemoteThread/process-hollowing primitives), **network** (download/HTTP-client APIs), **shell & persistence** (PowerShell `-enc`, cmd, mshta, certutil, reg add, schtasks), **encoding** (Base64 / crypto primitives), and **authenticity** (unsigned PE with no Authenticode). High-entropy content and protector strings are only scored as packing when they co-occur or sit at the code entry; the weights are tuned so benign, legitimately-compiled programs stay at clean/low.
+
+## CLI usage
+
+`codebreak-cli` adapts its output to where stdout goes:
+
+- **terminal** → a color-coded human summary (RISK badge, hashes, entropy, indicators);
+- **piped / redirected** → clean raw JSON, ready for `jq`.
+
+```sh
+codebreak-cli <file>                        # human summary on a tty, raw JSON when piped
+codebreak-cli <file> --view                 # force the human summary
+codebreak-cli <file> --json                 # force raw JSON
+codebreak-cli <file> --pretty               # force indented JSON
+codebreak-cli <file> --risk                 # only the risk assessment (JSON)
+codebreak-cli <file> --behavior             # static host-behavior trace (see below)
+codebreak-cli <file> --deep                 # combined summary + behavior + disassembly
+codebreak-cli <file> --calls                # static call graph of the code section
+                        [--dot]            #   ... or export Graphviz DOT
+codebreak-cli <file> --asm                  # x86-64 disassembly of the code section
+                        [--offset N] [--base N] [--length N]
+codebreak-cli <file> --strings [PATTERN]    # extract strings; optional filter substring
+                        [--min-len N]      # minimum string length (default 4)
+                        [--kind all|ascii|wide] [--count N]
+codebreak-cli <file> --hex OFFSET           # hex dump from a byte offset
+                        [--hex-len N]       # how many bytes to show (default 256)
+codebreak-cli <file> --report OUT.html      # write a self-contained HTML report
+codebreak-cli --hash <file>                 # full analysis JSON for one file
+codebreak-cli --compare A B [--view]        # side-by-side structural + hash comparison
+codebreak-cli --batch DIR                   # scan a tree -> table on a tty, JSON when piped
+codebreak-cli --batch DIR --json F --csv F --html F   # export the batch three ways
+codebreak-cli --batch DIR --limit N --max-mb N        # bound the scan
+codebreak-cli --lang <code> <file> ...      # run with a localized terminal UI
+codebreak-cli --version | -h
+```
+
+### Languages
+
+CodeBreak's terminal (human) output is available in **English (default)** plus
+**Türkçe / 简体中文 / Русский / Español / Deutsch / 日本語 / 한국어 / Français**. The machine
+contract is never translated: when output is piped/redirected the JSON keys and
+all parsed data stay in English so scripts are unaffected — only the on-screen
+human views and the interactive shell are localized.
+
+Choose a language with a flag or the environment variable:
+
+```sh
+codebreak-cli --lang de <file>       # German human summary
+CODEBREAK_LANG=fr codebreak-cli <file>
+codebreak-cli --lang zh --deep <file>
+```
+
+Language codes: `en` (default), `tr` (Türkçe), `zh` (简体中文), `ru`, `es`, `de`,
+`ja`, `ko`, `fr`. In the interactive shell, run `lang` to list the available
+languages and `lang <code>` (or `language <code>`) to switch on the fly — e.g.
+`lang tr`.
+
+On **Windows** the console is switched to UTF-8 automatically at startup, so
+accented letters and Cyrillic/CJK text render correctly (no mojibake). On both
+platforms make sure your terminal uses a UTF-8 font/locale for best results.
+Localized UI chrome includes section headings, field labels, risk level and
+severity words, and messages; the actual *parsed data* (format labels, indicator
+titles/details, imported API names, disassembly mnemonics, file paths) stays in
+its original form because that is the analyzed content, not interface text.
+
+Exit code 0 on success, 1 on error (message on stderr). `--report` and the batch `--html` flag write self-contained HTML reports.
+
+### Interactive shell
+
+Run `codebreak-cli` with **no arguments** to enter an interactive `codebreak>` shell where you type commands the same way you would on the command line — bare file paths, `risk <file>`, `behavior <file>`, `deep <file>`, `calls <file> [--dot]`, `asm <file>` (alias `code`/`disasm`), `strings <file>`, `hex <file> 0x400`, `batch <dir>`, `compare <a> <b>`, `hash <file>`, `report <file> out.html`, plus `history`, `help`, `version`, `clear` and `exit`. This is handy when you double-click the exe on Windows instead of running it from a terminal. Your typed commands are saved to a history file (`~/.codebreak_history` on Linux, `%APPDATA%\CodeBreak.history` on Windows).
+
+### Code extraction (disassembly)
+
+`codebreak-cli <file> --asm` decodes the main executable section of a native PE or ELF x86-64 binary into an objdump-style listing: address, raw bytes, mnemonic and operands. It resolves relative branches/jumps/calls to their target addresses and follows RIP-relative addressing and ModRM/SIB forms. Step into any byte window with `--offset N --base N --length N` (e.g. to walk a single function). Output is a colorized terminal table, or `{"code":{"lines":[...]}}` JSON when piped.
+
+The on-screen listing borrows RE-workstation conventions: call targets are marked `sub_<addr>:` and branch targets `loc_<addr>:`, printed as a label line above the target and as a `; sub_...` / `; loc_...` comment on the referencing instruction. (The piped JSON stays machine-neutral and omits these labels.)
+
+### Call graph (static)
+
+`codebreak-cli <file> --calls` reconstructs a *static call graph* from the decoded code — no execution. It finds function starts at the entry point, at every resolved direct call target, and at any `endbr64` / callee-save prologue that follows a `ret`/`hlt` terminator (skipping `nop`/`int3` padding). Each direct call is then attributed to its enclosing function, and per function the tool reports what it calls, which addresses call it, and a direct/indirect call tally.
+
+- **terminal** → a colorized function index with caller/callee lists;
+- **piped** → `{"functions":[{name,addr,calls,callers,callerCount}],...}` JSON;
+- `--dot` → a Graphviz graph you can render, e.g. `dot -Tsvg call.gv > call.svg`.
+
+Internal calls resolve to other functions in the listing (`sub_…`); calls that leave the decoded section (PLT stubs, IAT thunks) are marked `ext_<addr>`; indirect calls (`call rax`, `call [rip+…]`) are counted but have no static target. The graph is a heuristic over decoded direct calls — unrooted branches and data-driven entries are a known limitation, not a guarantee.
+
+### Host behavior trace (static)
+
+`--behavior` answers *"where does this sample reach out, and what does it touch?"* **without ever executing the file.** It cross-references the strings and the imported APIs and reports four groups:
+
+- **network** — URLs / hostnames / IPs / e-mails found in the binary plus network-capable imports (`InternetOpen`/`HttpOpenRequest`, `WinHttp`, `WSAStartup`/`socket`/`connect`, `URLDownloadToFile`, ...);
+- **fileSystem** — path strings the sample references (`C:\...`, `%APPDATA%`, `%TEMP%`, `\Users\...`) and file APIs (`CreateFileW`, `WriteFile`, `NtCreateFile`, `MoveFile`, `CopyFile`, ...);
+- **process** — command/launch strings (`powershell`, `cmd /c`, `certutil`, `rundll32`, `schtasks`, ...) and process/code-injection APIs (`CreateProcessW`, `WriteProcessMemory`, `CreateRemoteThread`, ...);
+- **persistence** — Run-key / `\Startup\` candidates and registry/service APIs.
+
+Treat the output as *candidates*, not a runtime guarantee: it is derived statically and may include benign lookalikes (e.g. a version string such as `1.2.3.4` can read like an IP).
+
+## What is parsed
+
+| Format | Detection | Details extracted |
+|---|---|---|
+| PE (EXE/DLL/SYS) | `MZ` + `PE\0\0` | machine, timestamp, sections, entry point, imports per DLL, exports, rich header, debug directory + PDB GUID/age, resources, version info, TLS callbacks, Authenticode presence, .NET detection |
+| APK / AAB / JAR | ZIP with expected layout | package, version, min/target SDK, permissions, activities/services/receivers with export flags, binary AXML manifest decode, DEX header + classes, native libs per ABI, v1/v2/v3 signing, zip alignment |
+| ZIP | `PK` structures | entry tree, compression per entry, encrypted entries, zip64 |
+| GZIP | `1F 8B` | method, flags, mtime, OS, optional filename/comment, offset, stored CRC32 + uncompressed size |
+| TAR | `ustar` at 257 | member table (name/type/size/mode/mtime), totals, truncation flag |
+| ELF | `\x7fELF` | class, endianness, machine, type, sections, program segments, interpreter, dynamic symbols, soname |
+| Mach-O | magic `FEEDFACF`/`FEEDFACE`/`CAFEBABE` (big-endian variants) | load commands, segments and sections, entry point, linked dylibs |
+| Java class | `CAFEBABE` | version, constant pool, fields, methods with descriptors |
+| PDF | `%PDF` | version, object/stream/page counts, encryption (`/Encrypt`), embedded JavaScript, object-stream compression |
+| DEX | `dex\n` | header, checksum + SHA-1 validation, string/type/proto/field/class/method counts |
+| OLE2 (.doc/.xls/.ppt/.msi) | CFB magic `D0 CF 11 E0` | compound-file kind, FAT/DIFAT layout, directory-entry tree (storages/streams with paths, sizes, red/black-tree order), macro/VBA project presence |
+| PKCS #7 / CMS | SignedData OID | signer certificates (subject, issuer, serial, validity, signature algorithm, SHA-1 thumbprint), signer count, content type |
+| Anything else | — | hashes, entropy profile, strings, hex |
+
+Entropy is computed over 16 KB blocks with Shannon's formula; the overall figure is the weighted mean. Strings extraction recognizes ASCII (CP437-safe printable run) and UTF-16LE/BE.
+
+## Building
+
+### Linux
+
+```sh
+./build.sh          # plain g++/CMake, no dependencies
+```
+
+Output: `build-cli/codebreak-cli`.
+
+### Windows (Visual Studio 2022)
+
+Requirements: Visual Studio 2022 with the *Desktop development with C++* workload (CMake ships with it). From the repository root:
+
+```bat
+build.bat
+```
+
+Output: `build\Release\codebreak-cli.exe`. It is a plain console program — run it from a terminal, or double-click it to open the interactive shell.
+
+Equivalent manual commands:
+
+```bat
+cmake -S . -B build -A x64
+cmake --build build --config Release
+```
+
+MinGW-w64 (UCRT x64) also works: `cmake -S . -B build-mingw -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release` then `cmake --build build-mingw -j`.
+
+## Architecture
+
+```
+src/
+  analyze.cpp      format detection + orchestration, one JSON document out
+  pe.cpp elf.cpp zipfmt.cpp dex.cpp axml.cpp otherfmts.cpp miscfmt.cpp
+  olefmt.cpp x509.cpp
+                   format parsers (PE/COFF, ELF, ZIP/APK/JAR, DEX, binary AXML,
+                   Mach-O, Java class, GZIP, TAR, PDF, OLE2 compound files,
+                   X.509/PKCS #7 signatures)
+  risk.cpp         heuristic threat-scoring engine (0-100 + weighted signals)
+  behavior.cpp     static host-behavior extraction (network/file/process/persistence)
+  disasm.cpp       x86-64 disassembler (ModRM/SIB/REX/RIP-relative, branches/calls)
+  report.cpp       self-contained HTML report and batch-report generators
+  hashes.cpp       SHA-256, SHA-1, MD5, CRC32, entropy
+  util.cpp         file IO, string building, wide-string decode, formatting,
+                   recursive directory walk (batch scans)
+  jsonw.h jsonr.h  minimal JSON writer (engine) and parser (host)
+  cli/main_cli.cpp terminal front end (human/JSON views, risk, report, batch,
+                   interactive shell)
+tests/
+  run_tests.py     assertion suite; checks real parser output
+  sanitize_smoke.py  corrupt-input suite (truncated / bit-flipped / hostile
+                   headers); fails on crashes and sanitizer reports
+tools/make_fixtures.py  builds PE, APK, DEX, ELF, Mach-O, class, ZIP, GZIP,
+                        TAR, PDF, OLE2 (.doc) and PKCS #7 fixtures from scratch
+tools/cfbwriter.py      minimal OLE2 compound-file writer used by make_fixtures.py
+```
+
+## Continuous integration
+
+`.github/workflows/build.yml` runs on every push, pull request, published release and on demand (Actions -> `build` -> Run workflow). Nothing has to be compiled by hand to get a binary.
+
+**`build` job** — a four-platform matrix; each entry configures with CMake, builds a release binary, regenerates every fixture, runs the full `tests/run_tests.py` suite plus the corrupt-input `tests/sanitize_smoke.py`, packages the result and uploads it as a workflow artifact:
+
+| Platform | Artifact | Contents |
+|---|---|---|
+| Windows x64 (MSVC, `-A x64`) | `codebreak-windows-x64` | `codebreak-cli.exe` |
+| Linux x64 (GCC) | `codebreak-linux-cli` | `codebreak-cli` |
+| Linux x86, 32-bit (GCC `-m32`) | `codebreak-linux-x86` | `codebreak-cli` |
+| macOS universal (clang, `x86_64` + `arm64`) | `codebreak-macos-universal` | `codebreak-cli` |
+
+The 32-bit job matters: `size_t` is 32 bits there, so it catches mixed-width `std::min`/`std::max` calls and `size_t` arithmetic that silently wrap — a bug class that a 64-bit-only build never shows.
+
+**`sanitize` job** — builds the same sources with `-fsanitize=address,undefined -fno-sanitize-recover=all` and runs both test suites against that binary, so out-of-bounds reads and undefined behaviour on malformed input fail the build instead of shipping.
+
+Grab a build from the workflow's **Artifacts** panel on the Actions tab (a workflow run must finish first; push a tag `v*` or click *Run workflow* to trigger one).
+
+**Releases stay yours to cut.** Create/publish a release for any tag (`v2.0.1`, `v3`, whatever version you like) and the workflow attaches the binaries to it automatically — one zip per platform (`codebreak-cli-windows-x64.zip`, `codebreak-cli-linux-x64.zip`, `codebreak-cli-linux-x86.zip`, `codebreak-cli-macos-universal.zip`), each holding the CLI plus this README. Pushing a `v*` tag works the same way: if a release for that tag exists the assets are uploaded to it, otherwise they stay available as workflow artifacts and get attached as soon as the release is published.
+
+## Testing
+
+```sh
+python3 tools/make_fixtures.py     # builds every fixture from scratch
+CB_CLI=build-cli/codebreak-cli python3 tests/run_tests.py
+CB_CLI=build-cli/codebreak-cli python3 tests/sanitize_smoke.py
+```
+
+`run_tests.py` is the correctness suite (parsed fields against known ground truth). `sanitize_smoke.py` is the robustness suite: it feeds the CLI ~2200 pristine, truncated, bit-flipped, spliced and hand-crafted hostile inputs (an `MZ` header with `e_lfanew = 0xFFFFFFFF`, an ELF whose `e_shoff` sits near 2^64, an OLE2 header with a 6307-bit sector shift, ZIP EOCD extremes, and more) and fails on any crash or sanitizer diagnostic. It is deterministic (fixed seed) and useful both against a release build — where it catches segfaults — and against an ASan/UBSan build, where it catches out-of-bounds reads:
+
+```sh
+cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all -g -O1" \
+  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+cmake --build build-asan -j
+CB_CLI=build-asan/codebreak-cli python3 tests/sanitize_smoke.py
+```
+
+The suite builds a real PE image (sections, imports, exports, rich header, debug directory, TLS, version info, certificate table), a real signed APK (ZIP + binary AXML manifest + DEX with valid SHA-1/Adler-32 + v1/v2 signature blocks), an ELF shared object, a Mach-O image, a Java class, a macro-bearing OLE2 `.doc` and an OpenSSL PKCS #7 signature, plus GZIP, TAR and PDF fixtures — then asserts dozens of parsed fields against known ground truth (including that the new parsers and the risk engine are present in the output) and checksum-validating runs against system binaries.
+
+## Developer & contact
+
+CodeBreak is developed by a single developer. Questions, feedback, feature ideas and bug reports are welcome:
+
+- **TikTok** — [@szoboszlai2113](https://www.tiktok.com/@szoboszlai2113)
+- **E-mail** — [user2102392109@proton.me](mailto:user2102392109@proton.me)
+
+If you have a file that CodeBreak mis-parses or crashes on, or a suggestion for a new parser or analysis view, reach out — screenshots and sample files (anonymized if needed) make it easiest to help.
+
+## License
+
+MIT.
