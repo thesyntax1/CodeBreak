@@ -712,15 +712,34 @@ def build_java_class():
 
 
 def build_elf():
+    """ELF64 fixture, compiled from C so it contains real code, symbols and a
+    real interpreter section.
+
+    Only a host whose toolchain actually emits ELF may overwrite the fixture:
+    on macOS "gcc" is clang (Mach-O out) and on Windows there is no gcc at all,
+    and either way the result would be a non-ELF file named fixture_elf64 - the
+    ELF assertions in tests/run_tests.py would then test the wrong format. In
+    that case the committed fixture is kept as-is.
+    """
     src = b'#include <stdio.h>\nstatic const char* msg = "codebreak elf fixture";\nint helper(int x) { return x * 2 + 1; }\nint main(void) { printf("%s %d\\n", msg, helper(21)); return 0; }\n'
     import subprocess, tempfile
-    with tempfile.TemporaryDirectory() as td:
-        c = os.path.join(td, "f.c")
-        o = os.path.join(td, "f")
-        open(c, "wb").write(src)
-        subprocess.run(["gcc", "-o", o, c], check=True)
-        data = open(o, "rb").read()
     path = os.path.join(OUT, "fixture_elf64")
+    data = b""
+    why = "host toolchain did not produce an ELF image"
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            c = os.path.join(td, "f.c")
+            o = os.path.join(td, "f")
+            open(c, "wb").write(src)
+            subprocess.run(["gcc", "-o", o, c], check=True, capture_output=True)
+            data = open(o, "rb").read()
+    except (OSError, subprocess.SubprocessError) as exc:
+        why = "gcc unavailable: %s" % exc
+    if data[:4] != b"\x7fELF":
+        if os.path.exists(path):
+            print("kept", path, "(%s)" % why)
+            return
+        raise SystemExit("cannot build fixture_elf64 (%s) and no committed fixture to keep" % why)
     open(path, "wb").write(data)
     print("wrote", path, len(data), "bytes")
 
@@ -792,7 +811,25 @@ def build_ole():
 
 
 def build_pkcs7():
+    """Self-signed PKCS #7 fixture via openssl.
+
+    openssl is not installed everywhere (and never on a stock Windows runner),
+    so fall back to the committed fixture_signature.p7 instead of aborting the
+    whole generator - build_signed_pe() below only needs the bytes.
+    """
     import subprocess, tempfile
+    out = os.path.join(OUT, "fixture_signature.p7")
+    try:
+        _build_pkcs7_openssl(subprocess, tempfile, out)
+    except (OSError, subprocess.SubprocessError) as exc:
+        if os.path.exists(out):
+            print("kept", out, "(openssl unavailable: %s)" % exc)
+            return
+        raise SystemExit("cannot build fixture_signature.p7 (openssl unavailable: %s) "
+                         "and no committed fixture to keep" % exc)
+
+
+def _build_pkcs7_openssl(subprocess, tempfile, out):
     with tempfile.TemporaryDirectory() as td:
         cfg = os.path.join(td, "cfg.cnf")
         open(cfg, "w").write(
@@ -806,7 +843,6 @@ def build_pkcs7():
         subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
                         "-days", "30", "-keyout", key, "-out", cert,
                         "-config", cfg], check=True, capture_output=True)
-        out = os.path.join(OUT, "fixture_signature.p7")
         subprocess.run(["openssl", "cms", "-sign", "-in", payload, "-signer", cert,
                         "-inkey", key, "-outform", "DER", "-out", out], check=True, capture_output=True)
         print("wrote", out, os.path.getsize(out), "bytes")
