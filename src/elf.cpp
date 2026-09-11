@@ -1,6 +1,7 @@
 #include "pe.h"
 #include "jsonw.h"
 #include "util.h"
+#include <algorithm>
 #include <cstring>
 
 namespace cb {

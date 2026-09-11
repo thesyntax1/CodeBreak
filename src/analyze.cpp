@@ -7,6 +7,7 @@
 #include "dex.h"
 #include "risk.h"
 #include "x509.h"
+#include <algorithm>
 #include <cstring>
 
 namespace cb {

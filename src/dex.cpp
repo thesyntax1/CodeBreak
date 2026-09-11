@@ -3,6 +3,7 @@
 #include "jsonw.h"
 #include "util.h"
 #include "hashes.h"
+#include <algorithm>
 #include <unordered_map>
 
 namespace cb {

@@ -2,6 +2,7 @@
 #include "jsonw.h"
 #include "util.h"
 #include "x509.h"
+#include <algorithm>
 #include <cstring>
 #include <cmath>
 
@@ -847,7 +848,7 @@ PeSummary peParse(const uint8_t* d, size_t n, Builder& b) {
         b.kv("signed", certSize > 0);
         if (certSize && certOff < n) {
             if ((uint64_t)certOff + certSize > n) c.note("certificate table extends past end of file");
-            size_t secEnd = std::min((uint64_t)certOff + certSize, (uint64_t)n);
+            size_t secEnd = (size_t)std::min<uint64_t>((uint64_t)certOff + certSize, (uint64_t)n);
             size_t pos = certOff;
             uint32_t firstBlobOff = 0, firstBlobLen = 0;
             uint32_t winCertCount = 0;
@@ -875,7 +876,7 @@ PeSummary peParse(const uint8_t* d, size_t n, Builder& b) {
                 winCertCount++;
                 uint64_t aligned = (pos + (uint64_t)dwLen + 7u) & ~(uint64_t)7u;
                 if (aligned <= pos) break;
-                pos = (size_t)std::min(aligned, secEnd);
+                pos = (size_t)std::min<uint64_t>(aligned, (uint64_t)secEnd);
             }
             b.endArr();
             if (firstBlobLen) {
