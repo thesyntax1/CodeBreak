@@ -187,6 +187,8 @@ src/
                    interactive shell)
 tests/
   run_tests.py     assertion suite; checks real parser output
+  sanitize_smoke.py  corrupt-input suite (truncated / bit-flipped / hostile
+                   headers); fails on crashes and sanitizer reports
 tools/make_fixtures.py  builds PE, APK, DEX, ELF, Mach-O, class, ZIP, GZIP,
                         TAR, PDF, OLE2 (.doc) and PKCS #7 fixtures from scratch
 tools/cfbwriter.py      minimal OLE2 compound-file writer used by make_fixtures.py
@@ -194,20 +196,41 @@ tools/cfbwriter.py      minimal OLE2 compound-file writer used by make_fixtures.
 
 ## Continuous integration
 
-`.github/workflows/build.yml` runs on every push, pull request and on demand (Actions -> `build` -> Run workflow). It has two jobs:
+`.github/workflows/build.yml` runs on every push, pull request, published release and on demand (Actions -> `build` -> Run workflow). Nothing has to be compiled by hand to get a binary.
 
-- **Windows x64 (MSVC)** — configures `-A x64` and builds the release, then uploads `codebreak-cli.exe` as the `codebreak-windows-x64` artifact.
-- **Linux CLI + tests** — builds `codebreak-cli`, regenerates every fixture and runs the full `tests/run_tests.py` suite, then uploads the `codebreak-linux-cli` artifact.
+**`build` job** — a four-platform matrix; each entry configures with CMake, builds a release binary, regenerates every fixture, runs the full `tests/run_tests.py` suite plus the corrupt-input `tests/sanitize_smoke.py`, packages the result and uploads it as a workflow artifact:
 
-Grab the built exe from the workflow's **Artifacts** panel on the Actions tab (a workflow run must finish first; push a tag `v*` or click *Run workflow* to trigger a build).
+| Platform | Artifact | Contents |
+|---|---|---|
+| Windows x64 (MSVC, `-A x64`) | `codebreak-windows-x64` | `codebreak-cli.exe` |
+| Linux x64 (GCC) | `codebreak-linux-cli` | `codebreak-cli` |
+| Linux x86, 32-bit (GCC `-m32`) | `codebreak-linux-x86` | `codebreak-cli` |
+| macOS universal (clang, `x86_64` + `arm64`) | `codebreak-macos-universal` | `codebreak-cli` |
 
-Official, easy-to-install builds are attached to each **release**: every tagged release ships `codebreak-cli.exe` (Windows x64) and a Linux CLI build as release assets on the GitHub **Releases** page.
+The 32-bit job matters: `size_t` is 32 bits there, so it catches mixed-width `std::min`/`std::max` calls and `size_t` arithmetic that silently wrap — a bug class that a 64-bit-only build never shows.
+
+**`sanitize` job** — builds the same sources with `-fsanitize=address,undefined -fno-sanitize-recover=all` and runs both test suites against that binary, so out-of-bounds reads and undefined behaviour on malformed input fail the build instead of shipping.
+
+Grab a build from the workflow's **Artifacts** panel on the Actions tab (a workflow run must finish first; push a tag `v*` or click *Run workflow* to trigger one).
+
+**Releases stay yours to cut.** Create/publish a release for any tag (`v2.0.1`, `v3`, whatever version you like) and the workflow attaches the binaries to it automatically — one zip per platform (`codebreak-cli-windows-x64.zip`, `codebreak-cli-linux-x64.zip`, `codebreak-cli-linux-x86.zip`, `codebreak-cli-macos-universal.zip`), each holding the CLI plus this README. Pushing a `v*` tag works the same way: if a release for that tag exists the assets are uploaded to it, otherwise they stay available as workflow artifacts and get attached as soon as the release is published.
 
 ## Testing
 
 ```sh
 python3 tools/make_fixtures.py     # builds every fixture from scratch
 CB_CLI=build-cli/codebreak-cli python3 tests/run_tests.py
+CB_CLI=build-cli/codebreak-cli python3 tests/sanitize_smoke.py
+```
+
+`run_tests.py` is the correctness suite (parsed fields against known ground truth). `sanitize_smoke.py` is the robustness suite: it feeds the CLI ~2200 pristine, truncated, bit-flipped, spliced and hand-crafted hostile inputs (an `MZ` header with `e_lfanew = 0xFFFFFFFF`, an ELF whose `e_shoff` sits near 2^64, an OLE2 header with a 6307-bit sector shift, ZIP EOCD extremes, and more) and fails on any crash or sanitizer diagnostic. It is deterministic (fixed seed) and useful both against a release build — where it catches segfaults — and against an ASan/UBSan build, where it catches out-of-bounds reads:
+
+```sh
+cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all -g -O1" \
+  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+cmake --build build-asan -j
+CB_CLI=build-asan/codebreak-cli python3 tests/sanitize_smoke.py
 ```
 
 The suite builds a real PE image (sections, imports, exports, rich header, debug directory, TLS, version info, certificate table), a real signed APK (ZIP + binary AXML manifest + DEX with valid SHA-1/Adler-32 + v1/v2 signature blocks), an ELF shared object, a Mach-O image, a Java class, a macro-bearing OLE2 `.doc` and an OpenSSL PKCS #7 signature, plus GZIP, TAR and PDF fixtures — then asserts dozens of parsed fields against known ground truth (including that the new parsers and the risk engine are present in the output) and checksum-validating runs against system binaries.
