@@ -18,17 +18,21 @@ struct Rd {
     bool ok() const { return !err; }
     size_t left() const { return err || o > n ? 0 : n - o; }
     void fail() { err = true; }
-    uint8_t u8() { if (o + 1 > n) { err = true; return 0; } return p[o++]; }
-    uint16_t u16() { if (o + 2 > n) { err = true; return 0; } uint16_t v = (uint16_t)(p[o] | ((uint16_t)p[o + 1] << 8)); o += 2; return v; }
-    uint32_t u32() { if (o + 4 > n) { err = true; return 0; } uint32_t v = (uint32_t)p[o] | ((uint32_t)p[o + 1] << 8) | ((uint32_t)p[o + 2] << 16) | ((uint32_t)p[o + 3] << 24); o += 4; return v; }
-    uint64_t u64() { if (o + 8 > n) { err = true; return 0; } uint64_t v = 0; for (int i = 7; i >= 0; i--) v = (v << 8) | p[o + i]; o += 8; return v; }
-    uint16_t u16be() { if (o + 2 > n) { err = true; return 0; } uint16_t v = ((uint16_t)p[o] << 8) | p[o + 1]; o += 2; return v; }
-    uint32_t u32be() { if (o + 4 > n) { err = true; return 0; } uint32_t v = ((uint32_t)p[o] << 24) | ((uint32_t)p[o + 1] << 16) | ((uint32_t)p[o + 2] << 8) | p[o + 3]; o += 4; return v; }
-    uint64_t u64be() { if (o + 8 > n) { err = true; return 0; } uint64_t v = 0; for (int i = 0; i < 8; i++) v = (v << 8) | p[o + i]; o += 8; return v; }
+    // Overflow-proof bounds check. Offsets reach Rd straight out of untrusted
+    // files (often as an int64_t cast to size_t), so "o + k > n" can wrap
+    // around and pass; compare against the bytes that are actually left.
+    bool have(size_t k) const { return !err && k <= n && o <= n - k && (k == 0 || p != nullptr); }
+    uint8_t u8() { if (!have(1)) { err = true; return 0; } return p[o++]; }
+    uint16_t u16() { if (!have(2)) { err = true; return 0; } uint16_t v = (uint16_t)(p[o] | ((uint16_t)p[o + 1] << 8)); o += 2; return v; }
+    uint32_t u32() { if (!have(4)) { err = true; return 0; } uint32_t v = (uint32_t)p[o] | ((uint32_t)p[o + 1] << 8) | ((uint32_t)p[o + 2] << 16) | ((uint32_t)p[o + 3] << 24); o += 4; return v; }
+    uint64_t u64() { if (!have(8)) { err = true; return 0; } uint64_t v = 0; for (int i = 7; i >= 0; i--) v = (v << 8) | p[o + i]; o += 8; return v; }
+    uint16_t u16be() { if (!have(2)) { err = true; return 0; } uint16_t v = ((uint16_t)p[o] << 8) | p[o + 1]; o += 2; return v; }
+    uint32_t u32be() { if (!have(4)) { err = true; return 0; } uint32_t v = ((uint32_t)p[o] << 24) | ((uint32_t)p[o + 1] << 16) | ((uint32_t)p[o + 2] << 8) | p[o + 3]; o += 4; return v; }
+    uint64_t u64be() { if (!have(8)) { err = true; return 0; } uint64_t v = 0; for (int i = 0; i < 8; i++) v = (v << 8) | p[o + i]; o += 8; return v; }
     uint64_t uleb() {
         uint64_t v = 0; int shift = 0;
         for (int i = 0; i < 10; i++) {
-            if (o + 1 > n) { err = true; return v; }
+            if (!have(1)) { err = true; return v; }
             uint8_t b = p[o++];
             v |= (uint64_t)(b & 0x7F) << shift;
             if (!(b & 0x80)) break;
@@ -36,8 +40,8 @@ struct Rd {
         }
         return v;
     }
-    const uint8_t* take(size_t k) { if (k > n || o > n - k) { err = true; return nullptr; } const uint8_t* r = p + o; o += k; return r; }
-    bool skip(size_t k) { if (k > n || o > n - k) { err = true; return false; } o += k; return true; }
+    const uint8_t* take(size_t k) { if (!have(k)) { err = true; return nullptr; } const uint8_t* r = p + o; o += k; return r; }
+    bool skip(size_t k) { if (!have(k)) { err = true; return false; } o += k; return true; }
     bool seek(size_t off) { if (off > n) { err = true; return false; } o = off; return true; }
 };
 

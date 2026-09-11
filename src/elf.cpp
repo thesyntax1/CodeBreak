@@ -132,9 +132,11 @@ void elfParse(const uint8_t* d, size_t n, Builder& b, IndCollector& inds) {
         const uint8_t* d;
         size_t n;
         bool be;
-        uint16_t u16(size_t o) { if (o + 2 > n) return 0; uint16_t v; memcpy(&v, d + o, 2); return be ? ((v & 0xFF) << 8) | (v >> 8) : v; }
-        uint32_t u32(size_t o) { if (o + 4 > n) return 0; uint32_t v; memcpy(&v, d + o, 4); if (be) v = ((v & 0xFF) << 24) | ((v & 0xFF00) << 8) | ((v >> 8) & 0xFF00) | (v >> 24); return v; }
-        uint64_t u64(size_t o) { if (o + 8 > n) return 0; uint64_t v; memcpy(&v, d + o, 8); if (be) { uint64_t r = 0; for (int i = 0; i < 8; i++) r = (r << 8) | ((v >> (8 * i)) & 0xFF); return r; } return v; }
+        // Bounds checks are written as "n - o < k" on purpose: o is derived from
+        // attacker-controlled 64-bit header fields, so "o + k > n" can wrap.
+        uint16_t u16(size_t o) { if (o > n || n - o < 2) return 0; uint16_t v; memcpy(&v, d + o, 2); return be ? ((v & 0xFF) << 8) | (v >> 8) : v; }
+        uint32_t u32(size_t o) { if (o > n || n - o < 4) return 0; uint32_t v; memcpy(&v, d + o, 4); if (be) v = ((v & 0xFF) << 24) | ((v & 0xFF00) << 8) | ((v >> 8) & 0xFF00) | (v >> 24); return v; }
+        uint64_t u64(size_t o) { if (o > n || n - o < 8) return 0; uint64_t v; memcpy(&v, d + o, 8); if (be) { uint64_t r = 0; for (int i = 0; i < 8; i++) r = (r << 8) | ((v >> (8 * i)) & 0xFF); return r; } return v; }
     } r{ d, n, be };
 
     uint16_t eType = r.u16(16);

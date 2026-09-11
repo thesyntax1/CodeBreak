@@ -73,7 +73,7 @@ std::string md5Hex(const uint8_t* d, size_t n) {
     for (size_t i = 0; i < full; i++) md5Transform(st, d + i * 64);
     uint8_t tail[128];
     size_t rem = n - full * 64;
-    memcpy(tail, d + full * 64, rem);
+    if (rem && d) memcpy(tail, d + full * 64, rem);  // rem == 0 for an empty buffer; memcpy(dst, nullptr, 0) is UB
     tail[rem] = 0x80;
     size_t padded = (rem + 1 <= 56) ? 64 : 128;
     memset(tail + rem + 1, 0, padded - rem - 1);
@@ -118,7 +118,7 @@ std::string sha1Hex(const uint8_t* d, size_t n) {
     for (size_t i = 0; i < full; i++) sha1Transform(h, d + i * 64);
     uint8_t tail[128];
     size_t rem = n - full * 64;
-    memcpy(tail, d + full * 64, rem);
+    if (rem && d) memcpy(tail, d + full * 64, rem);  // rem == 0 for an empty buffer; memcpy(dst, nullptr, 0) is UB
     tail[rem] = 0x80;
     size_t padded = (rem + 1 <= 56) ? 64 : 128;
     memset(tail + rem + 1, 0, padded - rem - 1);
@@ -182,7 +182,7 @@ std::string sha256Hex(const uint8_t* d, size_t n) {
     for (size_t i = 0; i < full; i++) sha256Transform(h, d + i * 64);
     uint8_t tail[128];
     size_t rem = n - full * 64;
-    memcpy(tail, d + full * 64, rem);
+    if (rem && d) memcpy(tail, d + full * 64, rem);  // rem == 0 for an empty buffer; memcpy(dst, nullptr, 0) is UB
     tail[rem] = 0x80;
     size_t padded = (rem + 1 <= 56) ? 64 : 128;
     memset(tail + rem + 1, 0, padded - rem - 1);

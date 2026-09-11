@@ -77,7 +77,9 @@ void oleParse(const uint8_t* d, size_t n, Builder& b, IndCollector& inds) {
         b.endObj();
         return;
     }
-    uint32_t sectorSize = 1u << h.sectorShift;
+    // sectorShift is attacker-controlled: shifting a 32-bit value by 32 or
+    // more is undefined behaviour, so fold it into the geometry check below.
+    uint32_t sectorSize = h.sectorShift >= 32 ? 0u : (1u << h.sectorShift);
     bool big = h.major == 4;
     uint64_t headerSize = big ? sectorSize : 512u;
     uint64_t miniSize = 64;

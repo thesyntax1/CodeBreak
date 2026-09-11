@@ -14,7 +14,9 @@ bool looksLikePe(const uint8_t* d, size_t n) {
     if (r.u16() != 0x5A4D) return false;
     r.seek(0x3C);
     uint32_t off = r.u32();
-    if (!r.ok() || off < 0x40 || off + 24 > n) return false;
+    // Widen before adding: off comes from the file, so "off + 24" would wrap
+    // around in 32-bit arithmetic and let a huge e_lfanew pass the bounds check.
+    if (!r.ok() || off < 0x40 || (uint64_t)off + 24 > (uint64_t)n) return false;
     return d[off] == 'P' && d[off + 1] == 'E' && d[off + 2] == 0 && d[off + 3] == 0;
 }
 
@@ -169,7 +171,7 @@ struct ViParser {
     size_t align4(size_t v) { return (v + 3) & ~(size_t)3; }
 
     bool readNode(size_t off, size_t end, std::string& keyOut, uint16_t& typeOut, size_t& valueOff, size_t& valueLen, size_t& valueEnd) {
-        if (off + 6 > end || off + 6 > n) { err = "bounds"; return false; }
+        if (off > end || off > n || end - off < 6 || n - off < 6) { err = "bounds"; return false; }
         Rd r(d, n, off);
         uint16_t valueLenWords = r.u16();
         typeOut = r.u16();
@@ -454,10 +456,17 @@ PeSummary peParse(const uint8_t* d, size_t n, Builder& b) {
         if (s.rsize && (uint64_t)s.roff + s.rsize > maxRawEnd) maxRawEnd = (uint64_t)s.roff + s.rsize;
     }
 
-    c.sum.rvaMap.ranges.push_back({ 0, std::max(c.sizeOfHeaders, (uint32_t)1), 0, c.sizeOfHeaders, "headers" });
+    // The raw-data window of every range is clamped to the bytes the file
+    // actually has: a corrupt section header (or an oversized SizeOfHeaders)
+    // can claim raw data past EOF, and toOff() would then hand out offsets
+    // that callers index into the buffer with.
+    uint32_t hdrRaw = (uint32_t)std::min<uint64_t>(c.sizeOfHeaders, (uint64_t)n);
+    c.sum.rvaMap.ranges.push_back({ 0, std::max(c.sizeOfHeaders, (uint32_t)1), 0, hdrRaw, "headers" });
     for (auto& s : c.secs) {
         uint32_t vsz = s.vsize ? s.vsize : s.rsize;
-        c.sum.rvaMap.ranges.push_back({ s.va, vsz, s.roff, s.rsize, s.name });
+        uint64_t avail = (uint64_t)s.roff < (uint64_t)n ? (uint64_t)n - s.roff : 0;
+        uint32_t raw = (uint32_t)std::min<uint64_t>(s.rsize, avail);
+        c.sum.rvaMap.ranges.push_back({ s.va, vsz, s.roff, raw, s.name });
     }
     c.sum.entryRva = entryRva;
     for (auto& s : c.secs) {
@@ -662,7 +671,7 @@ PeSummary peParse(const uint8_t* d, size_t n, Builder& b) {
                 }
                 std::vector<uint16_t> ords;
                 int64_t oo = c.offOf(addrOrds);
-                if (no >= 0 && nNames <= 1000000) {
+                if (oo >= 0 && nNames <= 1000000) {
                     Rd orr(d, n, (size_t)oo);
                     for (uint32_t i = 0; i < nNames && orr.ok(); i++) ords.push_back(orr.u16());
                 }
@@ -712,7 +721,7 @@ PeSummary peParse(const uint8_t* d, size_t n, Builder& b) {
         b.endArr();
         if (w.versionRva) {
             int64_t vo = c.offOf(w.versionRva);
-            if (vo >= 0) {
+            if (vo >= 0 && (uint64_t)vo < (uint64_t)n) {
                 size_t vlen = std::min((size_t)w.versionSize, n - (size_t)vo);
                 ViParser vi(d + (size_t)vo, vlen);
                 vi.parse(0, vlen, 0, "");
@@ -739,7 +748,7 @@ PeSummary peParse(const uint8_t* d, size_t n, Builder& b) {
         }
         if (w.manifestRva) {
             int64_t mo = c.offOf(w.manifestRva);
-            if (mo >= 0) {
+            if (mo >= 0 && (uint64_t)mo < (uint64_t)n) {
                 size_t mlen = std::min((size_t)w.manifestSize, n - (size_t)mo);
                 if (mlen >= 2 && d[mo] == 0xFF && d[mo + 1] == 0xFE) {
                     std::vector<uint16_t> wv((const uint16_t*)(d + mo + 2), (const uint16_t*)(d + mo + 2) + (mlen - 2) / 2);
@@ -821,7 +830,7 @@ PeSummary peParse(const uint8_t* d, size_t n, Builder& b) {
                 b.kv("typeName", tn ? tn : "unknown");
                 b.kv("size", (uint64_t)sizeOfData);
                 b.kv("rawOffset", (uint64_t)ptrRaw);
-                if (type == 2 && ptrRaw + 24 < n && d[ptrRaw] == 'R' && d[ptrRaw + 1] == 'S' && d[ptrRaw + 2] == 'D' && d[ptrRaw + 3] == 'S') {
+                if (type == 2 && (uint64_t)ptrRaw + 24 < (uint64_t)n && d[ptrRaw] == 'R' && d[ptrRaw + 1] == 'S' && d[ptrRaw + 2] == 'D' && d[ptrRaw + 3] == 'S') {
                     const uint8_t* g = d + ptrRaw + 4;
                     char guid[48];
                     snprintf(guid, sizeof(guid), "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
@@ -974,7 +983,7 @@ PeSummary peParse(const uint8_t* d, size_t n, Builder& b) {
     {
         int64_t ro = c.offOf(c.dirs[5][0]);
         b.kv("present", c.dirs[5][1] != 0);
-        if (c.dirs[5][1] && ro >= 0) {
+        if (c.dirs[5][1] && ro >= 0 && (uint64_t)ro < (uint64_t)n) {
             uint64_t count = 0, blocks = 0;
             Rd rr(d, n, (size_t)ro);
             size_t end = (size_t)ro + std::min((size_t)c.dirs[5][1], n - (size_t)ro);

@@ -61,10 +61,16 @@ ZipData zipParse(const uint8_t* d, size_t n, Builder& b, IndCollector& inds) {
     z.data = d;
     z.size = n;
 
-    size_t scanStart = n > 65557 + 22 ? n - (65557 + 22) : 0;
     int64_t eocd = -1;
-    for (size_t i = n >= 22 ? n - 22 : 0; i + 4 <= n && i >= scanStart; i--) {
-        if (d[i] == 'P' && d[i + 1] == 'K' && d[i + 2] == 5 && d[i + 3] == 6) { eocd = (int64_t)i; break; }
+    if (n >= 22) {
+        // Scan backwards for the EOCD signature. i is unsigned, so the loop
+        // must stop at scanStart explicitly: "i--" from 0 wraps to SIZE_MAX
+        // and the next iteration reads a byte before the buffer.
+        size_t scanStart = n > 65557 + 22 ? n - (65557 + 22) : 0;
+        for (size_t i = n - 22;; i--) {
+            if (d[i] == 'P' && d[i + 1] == 'K' && d[i + 2] == 5 && d[i + 3] == 6) { eocd = (int64_t)i; break; }
+            if (i == scanStart) break;
+        }
     }
     if (eocd < 0) {
         b.beginObj();

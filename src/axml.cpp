@@ -123,7 +123,7 @@ bool axmlParse(const uint8_t* d, size_t n, AxmlNode& root, std::string& errOut) 
         uint16_t type = r.u16();
         r.u16();
         uint32_t size = r.u32();
-        if (size < 8 || r.o - 8 + size > n) { errOut = "chunk overruns buffer"; return false; }
+        if (size < 8 || size > n || r.o < 8 || r.o - 8 > n - size) { errOut = "chunk overruns buffer"; return false; }
         size_t next = r.o - 8 + size;
         if (type == 0x0001) {
             if (!c.loadStrings(d + r.o - 8, size)) { errOut = c.err; return false; }
